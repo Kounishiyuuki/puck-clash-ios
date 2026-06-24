@@ -39,6 +39,19 @@ struct MatchConfig: Equatable {
     let rinkSize: Vector2
     let matchDuration: TimeInterval
     let playerSpeed: Double
+    let goalMouthHalfHeight: Double
+
+    init(
+        rinkSize: Vector2,
+        matchDuration: TimeInterval,
+        playerSpeed: Double,
+        goalMouthHalfHeight: Double? = nil
+    ) {
+        self.rinkSize = rinkSize
+        self.matchDuration = matchDuration
+        self.playerSpeed = playerSpeed
+        self.goalMouthHalfHeight = goalMouthHalfHeight ?? rinkSize.y * 0.2
+    }
 
     var rinkCenter: Vector2 {
         Vector2(x: rinkSize.x * 0.5, y: rinkSize.y * 0.5)
@@ -52,10 +65,19 @@ struct MatchConfig: Equatable {
         rinkSize.x
     }
 
+    var goalMouthMinY: Double {
+        rinkCenter.y - goalMouthHalfHeight
+    }
+
+    var goalMouthMaxY: Double {
+        rinkCenter.y + goalMouthHalfHeight
+    }
+
     static let standard = MatchConfig(
         rinkSize: Vector2(x: 640, y: 360),
         matchDuration: 180,
-        playerSpeed: 160
+        playerSpeed: 160,
+        goalMouthHalfHeight: 72
     )
 }
 

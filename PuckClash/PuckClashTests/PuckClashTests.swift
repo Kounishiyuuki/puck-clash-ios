@@ -12,7 +12,8 @@ struct PuckClashTests {
     private let config = MatchConfig(
         rinkSize: Vector2(x: 100, y: 50),
         matchDuration: 10,
-        playerSpeed: 20
+        playerSpeed: 20,
+        goalMouthHalfHeight: 10
     )
 
     @Test func initialStateUsesExpectedMatchDefaults() {
@@ -75,7 +76,7 @@ struct PuckClashTests {
         #expect(engine.state.puck.position == Vector2(x: 58, y: 21))
     }
 
-    @Test func homeScoresWhenPuckEntersRightGoal() {
+    @Test func homeScoresWhenPuckCrossesRightGoalLineInsideGoalMouth() {
         var state = GameState.initial(config: config)
         state.puck.velocity = Vector2(x: 60, y: 0)
         var engine = GameEngine(state: state)
@@ -86,7 +87,7 @@ struct PuckClashTests {
         #expect(engine.state.score.away == 0)
     }
 
-    @Test func awayScoresWhenPuckEntersLeftGoal() {
+    @Test func awayScoresWhenPuckCrossesLeftGoalLineInsideGoalMouth() {
         var state = GameState.initial(config: config)
         state.puck.velocity = Vector2(x: -60, y: 0)
         var engine = GameEngine(state: state)
@@ -95,6 +96,32 @@ struct PuckClashTests {
 
         #expect(engine.state.score.home == 0)
         #expect(engine.state.score.away == 1)
+    }
+
+    @Test func noScoreWhenPuckCrossesRightBoundaryOutsideGoalMouth() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 95, y: 5)
+        state.puck.velocity = Vector2(x: 10, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 100, y: 5))
+        #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
+    }
+
+    @Test func noScoreWhenPuckCrossesLeftBoundaryOutsideGoalMouth() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 5, y: 45)
+        state.puck.velocity = Vector2(x: -10, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 0, y: 45))
+        #expect(engine.state.puck.velocity == Vector2(x: -10, y: 0))
     }
 
     @Test func puckResetsToCenterAfterGoal() {
