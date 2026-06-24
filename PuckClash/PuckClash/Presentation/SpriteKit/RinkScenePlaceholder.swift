@@ -3,6 +3,8 @@ import SpriteKit
 final class RinkScene: SKScene {
     private var engine = GameEngine()
     private var lastUpdateTime: TimeInterval?
+    private var touchStartPoint: CGPoint?
+    private var touchCurrentPoint: CGPoint?
 
     private let rinkNode = SKShapeNode()
     private let leftGoalMouthNode = SKShapeNode()
@@ -28,8 +30,34 @@ final class RinkScene: SKScene {
         let deltaTime = lastUpdateTime.map { currentTime - $0 } ?? 0
         lastUpdateTime = currentTime
 
-        engine.update(deltaTime: min(deltaTime, 1.0 / 30.0), inputs: [])
+        engine.update(deltaTime: min(deltaTime, 1.0 / 30.0), inputs: playerInputs(at: currentTime))
         render(engine.state)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else {
+            return
+        }
+
+        let point = touch.location(in: self)
+        touchStartPoint = point
+        touchCurrentPoint = point
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else {
+            return
+        }
+
+        touchCurrentPoint = touch.location(in: self)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        clearTouch()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        clearTouch()
     }
 
     private func buildScene() {
@@ -71,6 +99,31 @@ final class RinkScene: SKScene {
         node.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
         node.lineWidth = 5
         addChild(node)
+    }
+
+    private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
+        guard let touchStartPoint, let touchCurrentPoint else {
+            return []
+        }
+
+        let dragVector = touchCurrentPoint - touchStartPoint
+        guard dragVector.length >= 8 else {
+            return []
+        }
+
+        // SpriteKit captures input only; GameCore still owns movement speed and state updates.
+        return [
+            PlayerInput(
+                playerId: .home,
+                moveDirection: dragVector.normalized,
+                timestamp: timestamp
+            )
+        ]
+    }
+
+    private func clearTouch() {
+        touchStartPoint = nil
+        touchCurrentPoint = nil
     }
 
     private func render(_ state: GameState) {
@@ -157,5 +210,27 @@ final class RinkScene: SKScene {
         path.move(to: start)
         path.addLine(to: end)
         return path
+    }
+}
+
+private extension CGPoint {
+    var length: Double {
+        Double((x * x + y * y).squareRoot())
+    }
+
+    var normalized: Vector2 {
+        let currentLength = length
+        guard currentLength > 0 else {
+            return .zero
+        }
+
+        return Vector2(
+            x: Double(x) / currentLength,
+            y: Double(y) / currentLength
+        )
+    }
+
+    static func - (lhs: CGPoint, rhs: CGPoint) -> CGPoint {
+        CGPoint(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
     }
 }
