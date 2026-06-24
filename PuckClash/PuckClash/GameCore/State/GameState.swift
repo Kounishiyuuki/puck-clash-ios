@@ -40,6 +40,18 @@ struct MatchConfig: Equatable {
     let matchDuration: TimeInterval
     let playerSpeed: Double
 
+    var rinkCenter: Vector2 {
+        Vector2(x: rinkSize.x * 0.5, y: rinkSize.y * 0.5)
+    }
+
+    var leftGoalBoundaryX: Double {
+        0
+    }
+
+    var rightGoalBoundaryX: Double {
+        rinkSize.x
+    }
+
     static let standard = MatchConfig(
         rinkSize: Vector2(x: 640, y: 360),
         matchDuration: 180,
@@ -75,7 +87,7 @@ struct GameState: Equatable {
                 velocity: .zero
             ),
             puck: PuckState(
-                position: Vector2(x: config.rinkSize.x * 0.5, y: config.rinkSize.y * 0.5),
+                position: config.rinkCenter,
                 velocity: .zero
             )
         )

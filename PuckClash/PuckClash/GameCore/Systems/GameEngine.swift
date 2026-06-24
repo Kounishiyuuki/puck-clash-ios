@@ -24,7 +24,7 @@ struct GameEngine {
         state.homePlayer = updatedPlayer(state.homePlayer, input: homeInput, deltaTime: deltaTime)
         state.awayPlayer = updatedPlayer(state.awayPlayer, input: awayInput, deltaTime: deltaTime)
 
-        state.puck.position = clampedToRink(state.puck.position + state.puck.velocity * deltaTime)
+        updatePuck(deltaTime: deltaTime)
 
         if state.remainingTime == 0 {
             state.phase = .finished
@@ -47,6 +47,33 @@ struct GameEngine {
         updatedPlayer.velocity = direction * state.config.playerSpeed
         updatedPlayer.position = clampedToRink(updatedPlayer.position + updatedPlayer.velocity * deltaTime)
         return updatedPlayer
+    }
+
+    private mutating func updatePuck(deltaTime: TimeInterval) {
+        let nextPosition = state.puck.position + state.puck.velocity * deltaTime
+
+        if nextPosition.x <= state.config.leftGoalBoundaryX {
+            scoreGoal(for: .away)
+            return
+        }
+
+        if nextPosition.x >= state.config.rightGoalBoundaryX {
+            scoreGoal(for: .home)
+            return
+        }
+
+        state.puck.position = clampedToRink(nextPosition)
+    }
+
+    private mutating func scoreGoal(for side: PlayerSide) {
+        switch side {
+        case .home:
+            state.score.home += 1
+        case .away:
+            state.score.away += 1
+        }
+
+        state.puck = PuckState(position: state.config.rinkCenter, velocity: .zero)
     }
 
     private func clampedToRink(_ position: Vector2) -> Vector2 {

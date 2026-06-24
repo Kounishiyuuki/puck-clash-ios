@@ -75,6 +75,62 @@ struct PuckClashTests {
         #expect(engine.state.puck.position == Vector2(x: 58, y: 21))
     }
 
+    @Test func homeScoresWhenPuckEntersRightGoal() {
+        var state = GameState.initial(config: config)
+        state.puck.velocity = Vector2(x: 60, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score.home == 1)
+        #expect(engine.state.score.away == 0)
+    }
+
+    @Test func awayScoresWhenPuckEntersLeftGoal() {
+        var state = GameState.initial(config: config)
+        state.puck.velocity = Vector2(x: -60, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score.home == 0)
+        #expect(engine.state.score.away == 1)
+    }
+
+    @Test func puckResetsToCenterAfterGoal() {
+        var state = GameState.initial(config: config)
+        state.puck.velocity = Vector2(x: 60, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.puck.position == config.rinkCenter)
+    }
+
+    @Test func puckVelocityResetsAfterGoal() {
+        var state = GameState.initial(config: config)
+        state.puck.velocity = Vector2(x: -60, y: 5)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func scoreDoesNotChangeAfterMatchEnded() {
+        var state = GameState.initial(config: config)
+        state.phase = .finished
+        state.remainingTime = 0
+        state.puck.velocity = Vector2(x: 60, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == config.rinkCenter)
+        #expect(engine.state.puck.velocity == Vector2(x: 60, y: 0))
+    }
+
     @Test func remainingTimeDecreases() {
         var engine = GameEngine(state: .initial(config: config))
 
