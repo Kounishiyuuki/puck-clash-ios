@@ -52,17 +52,21 @@ struct GameEngine {
     private mutating func updatePuck(deltaTime: TimeInterval) {
         let nextPosition = state.puck.position + state.puck.velocity * deltaTime
 
-        if nextPosition.x <= state.config.leftGoalBoundaryX {
+        if nextPosition.x <= state.config.leftGoalBoundaryX && isInsideGoalMouth(nextPosition) {
             scoreGoal(for: .away)
             return
         }
 
-        if nextPosition.x >= state.config.rightGoalBoundaryX {
+        if nextPosition.x >= state.config.rightGoalBoundaryX && isInsideGoalMouth(nextPosition) {
             scoreGoal(for: .home)
             return
         }
 
         state.puck.position = clampedToRink(nextPosition)
+    }
+
+    private func isInsideGoalMouth(_ position: Vector2) -> Bool {
+        position.y >= state.config.goalMouthMinY && position.y <= state.config.goalMouthMaxY
     }
 
     private mutating func scoreGoal(for side: PlayerSide) {
