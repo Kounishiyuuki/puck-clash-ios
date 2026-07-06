@@ -50,6 +50,8 @@ struct MatchConfig: Equatable {
     let pickupRadius: Double
     let puckCarryOffset: Double
     let shotSpeed: Double
+    let contestRadius: Double
+    let contestCooldown: TimeInterval
 
     init(
         rinkSize: Vector2,
@@ -58,7 +60,9 @@ struct MatchConfig: Equatable {
         goalMouthHalfHeight: Double? = nil,
         pickupRadius: Double = 18,
         puckCarryOffset: Double = 12,
-        shotSpeed: Double = 320
+        shotSpeed: Double = 320,
+        contestRadius: Double = 20,
+        contestCooldown: TimeInterval = 0.5
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -67,6 +71,8 @@ struct MatchConfig: Equatable {
         self.pickupRadius = pickupRadius
         self.puckCarryOffset = puckCarryOffset
         self.shotSpeed = shotSpeed
+        self.contestRadius = contestRadius
+        self.contestCooldown = contestCooldown
     }
 
     var rinkCenter: Vector2 {
@@ -93,6 +99,10 @@ struct MatchConfig: Equatable {
         Vector2(x: rightGoalBoundaryX, y: rinkCenter.y)
     }
 
+    var homeGoalCenter: Vector2 {
+        Vector2(x: leftGoalBoundaryX, y: rinkCenter.y)
+    }
+
     static let standard = MatchConfig(
         rinkSize: Vector2(x: 640, y: 360),
         matchDuration: 180,
@@ -110,6 +120,7 @@ struct GameState: Equatable {
     var awayPlayer: PlayerState
     var puck: PuckState
     var possession: PuckPossession
+    var contestCooldownRemaining: TimeInterval = 0
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(

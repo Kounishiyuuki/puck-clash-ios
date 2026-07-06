@@ -17,6 +17,7 @@ struct GameEngine {
         }
 
         state.remainingTime = max(0, state.remainingTime - deltaTime)
+        state.contestCooldownRemaining = max(0, state.contestCooldownRemaining - deltaTime)
 
         let homeInput = latestInput(for: .home, in: inputs)
         let awayInput = latestInput(for: .away, in: inputs) ?? awayCPUInput()
@@ -24,16 +25,22 @@ struct GameEngine {
         state.homePlayer = updatedPlayer(state.homePlayer, input: homeInput, deltaTime: deltaTime)
         state.awayPlayer = updatedPlayer(state.awayPlayer, input: awayInput, deltaTime: deltaTime)
 
-        let shotFired = handleShot(input: homeInput)
+        let homeShot = handleShot(by: .home, input: homeInput)
+        let awayShot = handleShot(by: .away, input: awayInput)
 
-        if state.possession == .home {
-            carryPuck()
-        } else {
+        resolveContest()
+
+        switch state.possession {
+        case .home:
+            carryPuck(by: .home)
+        case .away:
+            carryPuck(by: .away)
+        case .none:
             updatePuck(deltaTime: deltaTime)
         }
 
-        if !shotFired {
-            tryHomePickup()
+        if !homeShot && !awayShot {
+            tryPickup()
         }
 
         if state.remainingTime == 0 {
@@ -62,63 +69,116 @@ struct GameEngine {
         return updatedPlayer
     }
 
-    // Minimal deterministic away CPU: chase the free puck, or hold a defensive
-    // spot between the home carrier and the away goal when home has possession.
+    // Minimal deterministic away CPU: carry toward the home goal and shoot when
+    // close enough, chase the home carrier to contest, or chase the free puck.
     private func awayCPUInput() -> PlayerInput {
         let target: Vector2
-        if state.possession == .home {
-            target = (state.homePlayer.position + state.config.awayGoalCenter) * 0.5
-        } else {
+        var isShooting = false
+
+        switch state.possession {
+        case .away:
+            target = state.config.homeGoalCenter
+            isShooting = state.awayPlayer.position.x <= cpuShotTriggerX
+        case .home:
+            target = state.homePlayer.position
+        case .none:
             target = state.puck.position
         }
 
         let toTarget = target - state.awayPlayer.position
         let direction = toTarget.length > Self.cpuArrivalThreshold ? toTarget.normalized : .zero
-        return PlayerInput(playerId: .away, moveDirection: direction)
+        return PlayerInput(playerId: .away, moveDirection: direction, isShooting: isShooting)
     }
 
     private static let cpuArrivalThreshold: Double = 2
 
-    private mutating func handleShot(input: PlayerInput?) -> Bool {
-        guard let input, input.isShooting, state.possession == .home else {
+    private var cpuShotTriggerX: Double {
+        state.config.rinkSize.x * 0.35
+    }
+
+    private mutating func handleShot(by side: PlayerSide, input: PlayerInput?) -> Bool {
+        guard let input, input.isShooting, state.possession == possession(for: side) else {
             return false
         }
 
         state.possession = .none
-        state.puck.velocity = homeAimDirection(preferring: input.moveDirection) * state.config.shotSpeed
+        state.puck.velocity = aimDirection(for: side, preferring: input.moveDirection) * state.config.shotSpeed
         return true
     }
 
-    private mutating func carryPuck() {
-        let carryDirection = homeAimDirection(preferring: .zero)
-        state.puck.position = clampedToRink(
-            state.homePlayer.position + carryDirection * state.config.puckCarryOffset
-        )
+    // A defender close enough to the carrier steals the puck. The cooldown keeps
+    // the same pair from trading steals back on every subsequent frame.
+    private mutating func resolveContest() {
+        guard state.contestCooldownRemaining == 0 else {
+            return
+        }
+
+        let playerDistance = (state.homePlayer.position - state.awayPlayer.position).length
+        guard playerDistance <= state.config.contestRadius else {
+            return
+        }
+
+        switch state.possession {
+        case .home:
+            state.possession = .away
+        case .away:
+            state.possession = .home
+        case .none:
+            return
+        }
+
+        state.contestCooldownRemaining = state.config.contestCooldown
+    }
+
+    private mutating func carryPuck(by side: PlayerSide) {
+        let carrier = player(for: side)
+        let carryDirection = aimDirection(for: side, preferring: .zero)
+        state.puck.position = clampedToRink(carrier.position + carryDirection * state.config.puckCarryOffset)
         state.puck.velocity = .zero
     }
 
-    private mutating func tryHomePickup() {
+    private mutating func tryPickup() {
         guard state.possession == PuckPossession.none else {
             return
         }
 
-        if (state.puck.position - state.homePlayer.position).length <= state.config.pickupRadius {
+        let homeDistance = (state.puck.position - state.homePlayer.position).length
+        let awayDistance = (state.puck.position - state.awayPlayer.position).length
+        let homeInRange = homeDistance <= state.config.pickupRadius
+        let awayInRange = awayDistance <= state.config.pickupRadius
+
+        if homeInRange && (!awayInRange || homeDistance <= awayDistance) {
             state.possession = .home
+        } else if awayInRange {
+            state.possession = .away
         }
     }
 
-    private func homeAimDirection(preferring preferred: Vector2) -> Vector2 {
+    private func aimDirection(for side: PlayerSide, preferring preferred: Vector2) -> Vector2 {
         let normalizedPreferred = preferred.normalized
         if normalizedPreferred != .zero {
             return normalizedPreferred
         }
 
-        if state.homePlayer.lastMoveDirection != .zero {
-            return state.homePlayer.lastMoveDirection
+        let shooter = player(for: side)
+        if shooter.lastMoveDirection != .zero {
+            return shooter.lastMoveDirection
         }
 
-        let towardGoal = (state.config.awayGoalCenter - state.homePlayer.position).normalized
-        return towardGoal != .zero ? towardGoal : Vector2(x: 1, y: 0)
+        let towardGoal = (opponentGoalCenter(for: side) - shooter.position).normalized
+        return towardGoal != .zero ? towardGoal : Vector2(x: side == .home ? 1 : -1, y: 0)
+    }
+
+    private func player(for side: PlayerSide) -> PlayerState {
+        side == .home ? state.homePlayer : state.awayPlayer
+    }
+
+    private func possession(for side: PlayerSide) -> PuckPossession {
+        side == .home ? .home : .away
+    }
+
+    private func opponentGoalCenter(for side: PlayerSide) -> Vector2 {
+        side == .home ? state.config.awayGoalCenter : state.config.homeGoalCenter
     }
 
     private mutating func updatePuck(deltaTime: TimeInterval) {
