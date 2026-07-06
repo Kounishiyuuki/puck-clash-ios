@@ -52,6 +52,7 @@ struct MatchConfig: Equatable {
     let shotSpeed: Double
     let contestRadius: Double
     let contestCooldown: TimeInterval
+    let wallRestitution: Double
 
     init(
         rinkSize: Vector2,
@@ -62,7 +63,8 @@ struct MatchConfig: Equatable {
         puckCarryOffset: Double = 12,
         shotSpeed: Double = 320,
         contestRadius: Double = 20,
-        contestCooldown: TimeInterval = 0.5
+        contestCooldown: TimeInterval = 0.5,
+        wallRestitution: Double = 1.0
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -73,6 +75,7 @@ struct MatchConfig: Equatable {
         self.shotSpeed = shotSpeed
         self.contestRadius = contestRadius
         self.contestCooldown = contestCooldown
+        self.wallRestitution = wallRestitution
     }
 
     var rinkCenter: Vector2 {
