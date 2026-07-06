@@ -5,6 +5,9 @@ final class RinkScene: SKScene {
     private var lastUpdateTime: TimeInterval?
     private var touchStartPoint: CGPoint?
     private var touchCurrentPoint: CGPoint?
+    private var pendingShot = false
+
+    private static let dragActivationDistance: Double = 8
 
     private let rinkNode = SKShapeNode()
     private let leftGoalMouthNode = SKShapeNode()
@@ -12,6 +15,7 @@ final class RinkScene: SKScene {
     private let homePlayerNode = SKShapeNode(circleOfRadius: 12)
     private let awayPlayerNode = SKShapeNode(circleOfRadius: 12)
     private let puckNode = SKShapeNode(circleOfRadius: 6)
+    private let possessionRingNode = SKShapeNode(circleOfRadius: 18)
     private let scoreLabel = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
     private let timeLabel = SKLabelNode(fontNamed: "HelveticaNeue-Medium")
 
@@ -53,6 +57,13 @@ final class RinkScene: SKScene {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        // A touch that ends without dragging is a tap: request a shot.
+        // GameCore decides whether the shot is valid (home must possess the puck).
+        if let touchStartPoint, let touchCurrentPoint,
+           (touchCurrentPoint - touchStartPoint).length < Self.dragActivationDistance {
+            pendingShot = true
+        }
+
         clearTouch()
     }
 
@@ -86,6 +97,12 @@ final class RinkScene: SKScene {
         puckNode.lineWidth = 1
         addChild(puckNode)
 
+        possessionRingNode.fillColor = .clear
+        possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
+        possessionRingNode.lineWidth = 2
+        possessionRingNode.isHidden = true
+        addChild(possessionRingNode)
+
         scoreLabel.fontSize = 24
         scoreLabel.verticalAlignmentMode = .top
         addChild(scoreLabel)
@@ -102,20 +119,27 @@ final class RinkScene: SKScene {
     }
 
     private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
-        guard let touchStartPoint, let touchCurrentPoint else {
+        var moveDirection = Vector2.zero
+        if let touchStartPoint, let touchCurrentPoint {
+            let dragVector = touchCurrentPoint - touchStartPoint
+            if dragVector.length >= Self.dragActivationDistance {
+                moveDirection = dragVector.normalized
+            }
+        }
+
+        let isShooting = pendingShot
+        pendingShot = false
+
+        guard moveDirection != .zero || isShooting else {
             return []
         }
 
-        let dragVector = touchCurrentPoint - touchStartPoint
-        guard dragVector.length >= 8 else {
-            return []
-        }
-
-        // SpriteKit captures input only; GameCore still owns movement speed and state updates.
+        // SpriteKit captures input only; GameCore still owns movement, possession, and shot rules.
         return [
             PlayerInput(
                 playerId: .home,
-                moveDirection: dragVector.normalized,
+                moveDirection: moveDirection,
+                isShooting: isShooting,
                 timestamp: timestamp
             )
         ]
@@ -138,6 +162,17 @@ final class RinkScene: SKScene {
         homePlayerNode.position = scenePoint(for: state.homePlayer.position, config: state.config, rinkFrame: rinkFrame)
         awayPlayerNode.position = scenePoint(for: state.awayPlayer.position, config: state.config, rinkFrame: rinkFrame)
         puckNode.position = scenePoint(for: state.puck.position, config: state.config, rinkFrame: rinkFrame)
+
+        switch state.possession {
+        case .home:
+            possessionRingNode.isHidden = false
+            possessionRingNode.position = homePlayerNode.position
+        case .away:
+            possessionRingNode.isHidden = false
+            possessionRingNode.position = awayPlayerNode.position
+        case .none:
+            possessionRingNode.isHidden = true
+        }
 
         scoreLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 12)
         scoreLabel.text = "\(state.score.home) - \(state.score.away)"

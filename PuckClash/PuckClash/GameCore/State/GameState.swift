@@ -15,6 +15,13 @@ struct PlayerState: Equatable {
     let side: PlayerSide
     var position: Vector2
     var velocity: Vector2
+    var lastMoveDirection: Vector2 = .zero
+}
+
+enum PuckPossession: Equatable {
+    case none
+    case home
+    case away
 }
 
 struct PuckState: Equatable {
@@ -40,17 +47,26 @@ struct MatchConfig: Equatable {
     let matchDuration: TimeInterval
     let playerSpeed: Double
     let goalMouthHalfHeight: Double
+    let pickupRadius: Double
+    let puckCarryOffset: Double
+    let shotSpeed: Double
 
     init(
         rinkSize: Vector2,
         matchDuration: TimeInterval,
         playerSpeed: Double,
-        goalMouthHalfHeight: Double? = nil
+        goalMouthHalfHeight: Double? = nil,
+        pickupRadius: Double = 18,
+        puckCarryOffset: Double = 12,
+        shotSpeed: Double = 320
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
         self.playerSpeed = playerSpeed
         self.goalMouthHalfHeight = goalMouthHalfHeight ?? rinkSize.y * 0.2
+        self.pickupRadius = pickupRadius
+        self.puckCarryOffset = puckCarryOffset
+        self.shotSpeed = shotSpeed
     }
 
     var rinkCenter: Vector2 {
@@ -73,6 +89,10 @@ struct MatchConfig: Equatable {
         rinkCenter.y + goalMouthHalfHeight
     }
 
+    var awayGoalCenter: Vector2 {
+        Vector2(x: rightGoalBoundaryX, y: rinkCenter.y)
+    }
+
     static let standard = MatchConfig(
         rinkSize: Vector2(x: 640, y: 360),
         matchDuration: 180,
@@ -89,6 +109,7 @@ struct GameState: Equatable {
     var homePlayer: PlayerState
     var awayPlayer: PlayerState
     var puck: PuckState
+    var possession: PuckPossession
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
@@ -111,7 +132,8 @@ struct GameState: Equatable {
             puck: PuckState(
                 position: config.rinkCenter,
                 velocity: .zero
-            )
+            ),
+            possession: .none
         )
     }
 }
