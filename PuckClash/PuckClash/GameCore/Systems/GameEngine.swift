@@ -199,7 +199,40 @@ struct GameEngine {
             return
         }
 
-        state.puck.position = clampedToRink(nextPosition)
+        reflectPuckOffWalls(nextPosition: nextPosition)
+    }
+
+    // Mirror the puck off any boundary it overshoots and flip that axis' velocity
+    // (scaled by restitution). Reached only for a free/shot puck that did not score;
+    // left/right reflection therefore applies outside the goal mouth only.
+    private mutating func reflectPuckOffWalls(nextPosition: Vector2) {
+        let restitution = state.config.wallRestitution
+        let rinkWidth = state.config.rinkSize.x
+        let rinkHeight = state.config.rinkSize.y
+
+        var positionX = nextPosition.x
+        var positionY = nextPosition.y
+        var velocityX = state.puck.velocity.x
+        var velocityY = state.puck.velocity.y
+
+        if positionX < 0 {
+            positionX = -positionX
+            velocityX = -velocityX * restitution
+        } else if positionX > rinkWidth {
+            positionX = 2 * rinkWidth - positionX
+            velocityX = -velocityX * restitution
+        }
+
+        if positionY < 0 {
+            positionY = -positionY
+            velocityY = -velocityY * restitution
+        } else if positionY > rinkHeight {
+            positionY = 2 * rinkHeight - positionY
+            velocityY = -velocityY * restitution
+        }
+
+        state.puck.velocity = Vector2(x: velocityX, y: velocityY)
+        state.puck.position = clampedToRink(Vector2(x: positionX, y: positionY))
     }
 
     private func isInsideGoalMouth(_ position: Vector2) -> Bool {

@@ -106,9 +106,11 @@ struct PuckClashTests {
 
         engine.update(deltaTime: 1, inputs: [])
 
+        // Outside the goal mouth the right wall now reflects instead of clamping.
+        // next.x = 105 mirrors to 2*100-105 = 95, x velocity flips (restitution 1.0).
         #expect(engine.state.score == .zero)
-        #expect(engine.state.puck.position == Vector2(x: 100, y: 5))
-        #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
+        #expect(engine.state.puck.position == Vector2(x: 95, y: 5))
+        #expect(engine.state.puck.velocity == Vector2(x: -10, y: 0))
     }
 
     @Test func noScoreWhenPuckCrossesLeftBoundaryOutsideGoalMouth() {
@@ -119,9 +121,11 @@ struct PuckClashTests {
 
         engine.update(deltaTime: 1, inputs: [])
 
+        // Outside the goal mouth the left wall now reflects instead of clamping.
+        // next.x = -5 mirrors to 5, x velocity flips (restitution 1.0).
         #expect(engine.state.score == .zero)
-        #expect(engine.state.puck.position == Vector2(x: 0, y: 45))
-        #expect(engine.state.puck.velocity == Vector2(x: -10, y: 0))
+        #expect(engine.state.puck.position == Vector2(x: 5, y: 45))
+        #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
     }
 
     @Test func puckResetsToCenterAfterGoal() {
@@ -647,5 +651,128 @@ struct PuckClashTests {
         )
 
         #expect(engine.state == frozen)
+    }
+
+    // MARK: - Puck wall reflection
+
+    @Test func topWallReflectsPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 49)
+        state.puck.velocity = Vector2(x: 0, y: 20)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.puck.position == Vector2(x: 50, y: 49))
+        #expect(engine.state.puck.velocity == Vector2(x: 0, y: -20))
+    }
+
+    @Test func bottomWallReflectsPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 1)
+        state.puck.velocity = Vector2(x: 0, y: -20)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.puck.position == Vector2(x: 50, y: 1))
+        #expect(engine.state.puck.velocity == Vector2(x: 0, y: 20))
+    }
+
+    @Test func leftWallOutsideGoalMouthReflectsPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 1, y: 45)
+        state.puck.velocity = Vector2(x: -20, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 1, y: 45))
+        #expect(engine.state.puck.velocity == Vector2(x: 20, y: 0))
+    }
+
+    @Test func rightWallOutsideGoalMouthReflectsPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 99, y: 5)
+        state.puck.velocity = Vector2(x: 20, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 99, y: 5))
+        #expect(engine.state.puck.velocity == Vector2(x: -20, y: 0))
+    }
+
+    @Test func cornerReflectsBothAxes() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 99, y: 49)
+        state.puck.velocity = Vector2(x: 20, y: 20)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 99, y: 49))
+        #expect(engine.state.puck.velocity == Vector2(x: -20, y: -20))
+    }
+
+    @Test func puckInsideGoalMouthScoresAndDoesNotReflect() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 99, y: 25)
+        state.puck.velocity = Vector2(x: 20, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.score.home == 1)
+        #expect(engine.state.puck.position == config.rinkCenter)
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func possessedPuckIsNotReflected() {
+        var state = GameState.initial(config: config)
+        state.possession = .home
+        state.homePlayer.position = Vector2(x: 99, y: 10)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.possession == .home)
+        #expect(engine.state.puck.velocity == .zero)
+        #expect(engine.state.puck.position.x <= config.rinkSize.x)
+        #expect(engine.state.puck.position.y <= config.rinkSize.y)
+    }
+
+    @Test func wallRestitutionScalesReflectedVelocity() {
+        let bouncyConfig = MatchConfig(
+            rinkSize: Vector2(x: 100, y: 50),
+            matchDuration: 10,
+            playerSpeed: 20,
+            goalMouthHalfHeight: 10,
+            wallRestitution: 0.5
+        )
+        var state = GameState.initial(config: bouncyConfig)
+        state.puck.position = Vector2(x: 50, y: 49)
+        state.puck.velocity = Vector2(x: 0, y: 20)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.puck.velocity == Vector2(x: 0, y: -10))
+    }
+
+    @Test func buzzerFrameDoesNotReflectPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 99, y: 5)
+        state.puck.velocity = Vector2(x: 100, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 10, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.puck.position == Vector2(x: 99, y: 5))
+        #expect(engine.state.puck.velocity == Vector2(x: 100, y: 0))
     }
 }
