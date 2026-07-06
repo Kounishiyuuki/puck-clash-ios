@@ -493,4 +493,159 @@ struct PuckClashTests {
 
         #expect(engine.state.awayPlayer.position == Vector2(x: 85, y: 25))
     }
+
+    // MARK: - Finished-state immutability (regression guards)
+
+    @Test func inputAfterFinishedDoesNotMovePlayer() {
+        var state = GameState.initial(config: possessionConfig)
+        state.phase = .finished
+        let startPosition = state.homePlayer.position
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.5,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.homePlayer.position == startPosition)
+    }
+
+    @Test func shootAfterFinishedDoesNotChangePuck() {
+        var state = GameState.initial(config: possessionConfig)
+        state.phase = .finished
+        state.possession = .home
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.5,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    isShooting: true,
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.possession == .home)
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func contestAfterFinishedDoesNotChangePossession() {
+        var state = GameState.initial(config: possessionConfig)
+        state.phase = .finished
+        state.possession = .away
+        state.homePlayer.position = Vector2(x: 58, y: 25)
+        state.awayPlayer.position = Vector2(x: 60, y: 25)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.5, inputs: [])
+
+        #expect(engine.state.possession == .away)
+    }
+
+    @Test func finishedStateIsFullyImmutable() {
+        var state = GameState.initial(config: possessionConfig)
+        state.phase = .finished
+        state.possession = .home
+        state.puck.velocity = Vector2(x: 60, y: 0)
+        let frozen = state
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 1,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: -1, y: -1),
+                    isShooting: true,
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state == frozen)
+    }
+
+    // MARK: - Buzzer strictness (time expiry wins)
+
+    @Test func buzzerFrameEndsMatchWithoutMovingPlayer() {
+        let state = GameState.initial(config: possessionConfig)
+        let startPosition = state.homePlayer.position
+        var engine = GameEngine(state: state)
+
+        // deltaTime 10 with duration 10 brings remainingTime to exactly 0 this frame.
+        engine.update(
+            deltaTime: 10,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.remainingTime == 0)
+        #expect(engine.state.homePlayer.position == startPosition)
+    }
+
+    @Test func buzzerFrameDoesNotScore() {
+        var state = GameState.initial(config: possessionConfig)
+        state.puck.position = Vector2(x: 99, y: 25)
+        state.puck.velocity = Vector2(x: 100, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 10, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 99, y: 25))
+        #expect(engine.state.puck.velocity == Vector2(x: 100, y: 0))
+    }
+
+    @Test func buzzerFrameDoesNotPickUp() {
+        var state = GameState.initial(config: possessionConfig)
+        state.homePlayer.position = Vector2(x: 50, y: 25)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 10, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.possession == PuckPossession.none)
+    }
+
+    @Test func updatesAfterBuzzerAreNoOp() {
+        var engine = GameEngine(state: .initial(config: possessionConfig))
+
+        // Four 2.0 steps leave remainingTime at 2; the fifth hits exactly 0.
+        for _ in 0..<5 {
+            engine.update(deltaTime: 2, inputs: [])
+        }
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.remainingTime == 0)
+
+        let frozen = engine.state
+        engine.update(
+            deltaTime: 2,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    timestamp: 99
+                )
+            ]
+        )
+
+        #expect(engine.state == frozen)
+    }
 }
