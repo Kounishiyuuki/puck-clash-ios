@@ -175,4 +175,179 @@ struct PuckClashTests {
         #expect(engine.state.remainingTime == 0)
         #expect(engine.state.phase == .finished)
     }
+
+    // MARK: - Possession
+
+    private var possessionConfig: MatchConfig {
+        MatchConfig(
+            rinkSize: Vector2(x: 100, y: 50),
+            matchDuration: 10,
+            playerSpeed: 20,
+            goalMouthHalfHeight: 10,
+            pickupRadius: 5,
+            puckCarryOffset: 2,
+            shotSpeed: 40
+        )
+    }
+
+    @Test func homeGainsPossessionWhenCloseToPuck() {
+        var state = GameState.initial(config: possessionConfig)
+        state.homePlayer.position = Vector2(x: 47, y: 25)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.possession == .home)
+    }
+
+    @Test func homeDoesNotGainPossessionOutsidePickupRadius() {
+        var state = GameState.initial(config: possessionConfig)
+        state.homePlayer.position = Vector2(x: 40, y: 25)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.possession == PuckPossession.none)
+    }
+
+    @Test func possessedPuckFollowsHomePlayer() {
+        var state = GameState.initial(config: possessionConfig)
+        state.possession = .home
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.5,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 0, y: 1),
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.homePlayer.position == Vector2(x: 25, y: 35))
+        #expect(engine.state.puck.position == Vector2(x: 25, y: 37))
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func goalResetClearsPossession() {
+        var state = GameState.initial(config: possessionConfig)
+        state.possession = .away
+        state.puck.velocity = Vector2(x: 600, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.score.home == 1)
+        #expect(engine.state.possession == PuckPossession.none)
+    }
+
+    // MARK: - Shooting
+
+    @Test func shootingClearsPossessionAndSetsPuckVelocity() {
+        var state = GameState.initial(config: possessionConfig)
+        state.possession = .home
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    isShooting: true,
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.possession == PuckPossession.none)
+        #expect(engine.state.puck.velocity == Vector2(x: 40, y: 0))
+    }
+
+    @Test func shootingWithoutDirectionAimsAtAwayGoal() {
+        var state = GameState.initial(config: possessionConfig)
+        state.possession = .home
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [
+                PlayerInput(playerId: .home, isShooting: true, timestamp: 1)
+            ]
+        )
+
+        #expect(engine.state.puck.velocity == Vector2(x: 40, y: 0))
+    }
+
+    @Test func shootingWithoutPossessionDoesNotChangePuck() {
+        var state = GameState.initial(config: possessionConfig)
+        state.homePlayer.position = Vector2(x: 10, y: 10)
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [
+                PlayerInput(playerId: .home, isShooting: true, timestamp: 1)
+            ]
+        )
+
+        #expect(engine.state.possession == PuckPossession.none)
+        #expect(engine.state.puck.velocity == .zero)
+        #expect(engine.state.puck.position == possessionConfig.rinkCenter)
+    }
+
+    // MARK: - Away CPU
+
+    @Test func awayCPUMovesTowardFreePuck() {
+        var engine = GameEngine(state: .initial(config: possessionConfig))
+
+        engine.update(deltaTime: 0.5, inputs: [])
+
+        #expect(engine.state.awayPlayer.position == Vector2(x: 65, y: 25))
+        #expect(engine.state.awayPlayer.velocity == Vector2(x: -20, y: 0))
+    }
+
+    @Test func awayCPUMovesTowardDefensivePositionWhenHomePossesses() {
+        var state = GameState.initial(config: possessionConfig)
+        state.possession = .home
+        state.homePlayer.position = Vector2(x: 25, y: 5)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.5, inputs: [])
+
+        // Defensive target is midway between home carrier (25, 5) and away goal (100, 25).
+        #expect(engine.state.awayPlayer.position.x < 75)
+        #expect(engine.state.awayPlayer.position.y < 25)
+    }
+
+    @Test func awayCPUStaysInsideRinkBounds() {
+        var engine = GameEngine(state: .initial(config: possessionConfig))
+
+        for _ in 0..<200 {
+            engine.update(deltaTime: 0.05, inputs: [])
+        }
+
+        let position = engine.state.awayPlayer.position
+        #expect(position.x >= 0 && position.x <= possessionConfig.rinkSize.x)
+        #expect(position.y >= 0 && position.y <= possessionConfig.rinkSize.y)
+    }
+
+    @Test func awayCPUDoesNotOverrideExplicitAwayInput() {
+        var engine = GameEngine(state: .initial(config: possessionConfig))
+
+        engine.update(
+            deltaTime: 0.5,
+            inputs: [
+                PlayerInput(
+                    playerId: .away,
+                    moveDirection: Vector2(x: 1, y: 0),
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.awayPlayer.position == Vector2(x: 85, y: 25))
+    }
 }
