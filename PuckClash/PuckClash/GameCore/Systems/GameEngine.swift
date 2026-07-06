@@ -17,6 +17,15 @@ struct GameEngine {
         }
 
         state.remainingTime = max(0, state.remainingTime - deltaTime)
+
+        // Buzzer: the frame the clock reaches zero ends the match immediately.
+        // No movement, shooting, contest, puck update, pickup, or goal happens
+        // on this frame; time expiry wins over a same-frame goal.
+        if state.remainingTime == 0 {
+            state.phase = .finished
+            return
+        }
+
         state.contestCooldownRemaining = max(0, state.contestCooldownRemaining - deltaTime)
 
         let homeInput = latestInput(for: .home, in: inputs)
@@ -41,10 +50,6 @@ struct GameEngine {
 
         if !homeShot && !awayShot {
             tryPickup()
-        }
-
-        if state.remainingTime == 0 {
-            state.phase = .finished
         }
     }
 
