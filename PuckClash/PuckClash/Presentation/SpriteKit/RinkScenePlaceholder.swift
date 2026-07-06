@@ -167,9 +167,11 @@ final class RinkScene: SKScene {
         case .home:
             possessionRingNode.isHidden = false
             possessionRingNode.position = homePlayerNode.position
+            possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
         case .away:
             possessionRingNode.isHidden = false
             possessionRingNode.position = awayPlayerNode.position
+            possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.45, blue: 0.15, alpha: 1)
         case .none:
             possessionRingNode.isHidden = true
         }
