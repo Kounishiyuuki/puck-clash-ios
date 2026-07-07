@@ -34,6 +34,16 @@ final class PuckClashUITests: XCTestCase {
     }
 
     @MainActor
+    func testStartButtonExistsOnLaunch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        // The start screen is the entry point; its Start button must be present.
+        let startButton = app.buttons["start-match-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
