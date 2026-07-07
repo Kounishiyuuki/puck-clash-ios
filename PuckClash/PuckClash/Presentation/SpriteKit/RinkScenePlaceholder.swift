@@ -5,11 +5,18 @@ final class RinkScene: SKScene {
     private let onFinished: ((ScoreState) -> Void)?
     private var hasNotifiedFinish = false
     private var lastUpdateTime: TimeInterval?
-    private var touchStartPoint: CGPoint?
-    private var touchCurrentPoint: CGPoint?
-    private var pendingShot = false
+    private var touchScenePoint: CGPoint?
 
-    private static let dragActivationDistance: Double = 8
+    private let rinkNode = SKShapeNode()
+    private let centerLineNode = SKShapeNode()
+    private let centerCircleNode = SKShapeNode()
+    private let topGoalNode = SKShapeNode()
+    private let bottomGoalNode = SKShapeNode()
+    private let homeStrikerNode = SKShapeNode()
+    private let awayStrikerNode = SKShapeNode()
+    private let puckNode = SKShapeNode()
+    private let scoreLabel = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
+    private let timeLabel = SKLabelNode(fontNamed: "HelveticaNeue-Medium")
 
     // SpriteKit owns no match rules; it drives GameCore and reports the final
     // score once the match finishes so SwiftUI can navigate to the result screen.
@@ -25,18 +32,8 @@ final class RinkScene: SKScene {
         super.init(coder: aDecoder)
     }
 
-    private let rinkNode = SKShapeNode()
-    private let leftGoalMouthNode = SKShapeNode()
-    private let rightGoalMouthNode = SKShapeNode()
-    private let homePlayerNode = SKShapeNode(circleOfRadius: 12)
-    private let awayPlayerNode = SKShapeNode(circleOfRadius: 12)
-    private let puckNode = SKShapeNode(circleOfRadius: 6)
-    private let possessionRingNode = SKShapeNode(circleOfRadius: 18)
-    private let scoreLabel = SKLabelNode(fontNamed: "HelveticaNeue-Bold")
-    private let timeLabel = SKLabelNode(fontNamed: "HelveticaNeue-Medium")
-
     override func didMove(to view: SKView) {
-        backgroundColor = SKColor(red: 0.08, green: 0.17, blue: 0.24, alpha: 1)
+        backgroundColor = SKColor(red: 0.04, green: 0.06, blue: 0.11, alpha: 1)
         scaleMode = .resizeFill
         buildScene()
         render(engine.state)
@@ -67,115 +64,93 @@ final class RinkScene: SKScene {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else {
-            return
-        }
-
-        let point = touch.location(in: self)
-        touchStartPoint = point
-        touchCurrentPoint = point
+        touchScenePoint = touches.first?.location(in: self)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else {
-            return
-        }
-
-        touchCurrentPoint = touch.location(in: self)
+        touchScenePoint = touches.first?.location(in: self)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // A touch that ends without dragging is a tap: request a shot.
-        // GameCore decides whether the shot is valid (home must possess the puck).
-        if let touchStartPoint, let touchCurrentPoint,
-           (touchCurrentPoint - touchStartPoint).length < Self.dragActivationDistance {
-            pendingShot = true
-        }
-
-        clearTouch()
+        touchScenePoint = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        clearTouch()
+        touchScenePoint = nil
+    }
+
+    // Finger position becomes the home striker's target; GameCore confines it to
+    // the lower half. SpriteKit only translates the touch, it applies no rules.
+    private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
+        guard let touchScenePoint, size.width > 0, size.height > 0 else {
+            return []
+        }
+
+        let config = engine.state.config
+        let frame = rinkFrame(for: config)
+        guard frame.width > 0, frame.height > 0 else {
+            return []
+        }
+
+        let target = Vector2(
+            x: Double((touchScenePoint.x - frame.minX) / frame.width) * config.rinkSize.x,
+            y: Double((touchScenePoint.y - frame.minY) / frame.height) * config.rinkSize.y
+        )
+
+        return [PlayerInput(playerId: .home, targetPosition: target, timestamp: timestamp)]
     }
 
     private func buildScene() {
         removeAllChildren()
 
-        rinkNode.strokeColor = .white
+        rinkNode.strokeColor = SKColor(red: 0.55, green: 0.78, blue: 0.95, alpha: 1)
         rinkNode.lineWidth = 3
-        rinkNode.fillColor = SKColor(red: 0.70, green: 0.90, blue: 0.96, alpha: 1)
+        rinkNode.fillColor = SKColor(red: 0.13, green: 0.24, blue: 0.36, alpha: 1)
         addChild(rinkNode)
 
-        configureGoalMouth(leftGoalMouthNode)
-        configureGoalMouth(rightGoalMouthNode)
+        centerLineNode.strokeColor = SKColor(red: 0.55, green: 0.78, blue: 0.95, alpha: 0.5)
+        centerLineNode.lineWidth = 2
+        addChild(centerLineNode)
 
-        homePlayerNode.fillColor = SKColor(red: 0.12, green: 0.35, blue: 0.95, alpha: 1)
-        homePlayerNode.strokeColor = .white
-        homePlayerNode.lineWidth = 2
-        addChild(homePlayerNode)
+        centerCircleNode.strokeColor = SKColor(red: 0.55, green: 0.78, blue: 0.95, alpha: 0.5)
+        centerCircleNode.lineWidth = 2
+        centerCircleNode.fillColor = .clear
+        addChild(centerCircleNode)
 
-        awayPlayerNode.fillColor = SKColor(red: 0.90, green: 0.18, blue: 0.18, alpha: 1)
-        awayPlayerNode.strokeColor = .white
-        awayPlayerNode.lineWidth = 2
-        addChild(awayPlayerNode)
+        configureGoal(topGoalNode, color: SKColor(red: 0.90, green: 0.30, blue: 0.35, alpha: 1))
+        configureGoal(bottomGoalNode, color: SKColor(red: 0.20, green: 0.55, blue: 1.0, alpha: 1))
 
-        puckNode.fillColor = .black
-        puckNode.strokeColor = .white
-        puckNode.lineWidth = 1
+        homeStrikerNode.fillColor = SKColor(red: 0.16, green: 0.52, blue: 1.0, alpha: 1)
+        homeStrikerNode.strokeColor = .white
+        homeStrikerNode.lineWidth = 3
+        addChild(homeStrikerNode)
+
+        awayStrikerNode.fillColor = SKColor(red: 0.95, green: 0.28, blue: 0.34, alpha: 1)
+        awayStrikerNode.strokeColor = .white
+        awayStrikerNode.lineWidth = 3
+        addChild(awayStrikerNode)
+
+        puckNode.fillColor = SKColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1)
+        puckNode.strokeColor = SKColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
+        puckNode.lineWidth = 2
         addChild(puckNode)
 
-        possessionRingNode.fillColor = .clear
-        possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
-        possessionRingNode.lineWidth = 2
-        possessionRingNode.isHidden = true
-        addChild(possessionRingNode)
-
-        scoreLabel.fontSize = 24
+        scoreLabel.fontSize = 26
         scoreLabel.verticalAlignmentMode = .top
+        scoreLabel.fontColor = .white
         addChild(scoreLabel)
 
-        timeLabel.fontSize = 18
+        timeLabel.fontSize = 16
         timeLabel.verticalAlignmentMode = .top
+        timeLabel.fontColor = SKColor(white: 1, alpha: 0.75)
         addChild(timeLabel)
     }
 
-    private func configureGoalMouth(_ node: SKShapeNode) {
-        node.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
-        node.lineWidth = 5
+    private func configureGoal(_ node: SKShapeNode, color: SKColor) {
+        node.strokeColor = color
+        node.lineWidth = 6
+        node.lineCap = .round
         addChild(node)
-    }
-
-    private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
-        var moveDirection = Vector2.zero
-        if let touchStartPoint, let touchCurrentPoint {
-            let dragVector = touchCurrentPoint - touchStartPoint
-            if dragVector.length >= Self.dragActivationDistance {
-                moveDirection = dragVector.normalized
-            }
-        }
-
-        let isShooting = pendingShot
-        pendingShot = false
-
-        guard moveDirection != .zero || isShooting else {
-            return []
-        }
-
-        // SpriteKit captures input only; GameCore still owns movement, possession, and shot rules.
-        return [
-            PlayerInput(
-                playerId: .home,
-                moveDirection: moveDirection,
-                isShooting: isShooting,
-                timestamp: timestamp
-            )
-        ]
-    }
-
-    private func clearTouch() {
-        touchStartPoint = nil
-        touchCurrentPoint = nil
     }
 
     private func render(_ state: GameState) {
@@ -183,62 +158,52 @@ final class RinkScene: SKScene {
             return
         }
 
-        let rinkFrame = rinkFrame(for: state.config)
-        rinkNode.path = CGPath(rect: rinkFrame, transform: nil)
+        let config = state.config
+        let frame = rinkFrame(for: config)
+        let scale = frame.width / config.rinkSize.x
 
-        updateGoalMouths(config: state.config, rinkFrame: rinkFrame)
-        homePlayerNode.position = scenePoint(for: state.homePlayer.position, config: state.config, rinkFrame: rinkFrame)
-        awayPlayerNode.position = scenePoint(for: state.awayPlayer.position, config: state.config, rinkFrame: rinkFrame)
-        puckNode.position = scenePoint(for: state.puck.position, config: state.config, rinkFrame: rinkFrame)
+        rinkNode.path = CGPath(
+            roundedRect: frame,
+            cornerWidth: 18,
+            cornerHeight: 18,
+            transform: nil
+        )
 
-        switch state.possession {
-        case .home:
-            possessionRingNode.isHidden = false
-            possessionRingNode.position = homePlayerNode.position
-            possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.83, blue: 0.25, alpha: 1)
-        case .away:
-            possessionRingNode.isHidden = false
-            possessionRingNode.position = awayPlayerNode.position
-            possessionRingNode.strokeColor = SKColor(red: 1.0, green: 0.45, blue: 0.15, alpha: 1)
-        case .none:
-            possessionRingNode.isHidden = true
-        }
+        let leftX = frame.minX
+        let rightX = frame.maxX
+        let midY = scenePoint(for: config.rinkCenter, config: config, rinkFrame: frame).y
+        centerLineNode.path = linePath(from: CGPoint(x: leftX, y: midY), to: CGPoint(x: rightX, y: midY))
+        centerCircleNode.path = CGPath(
+            ellipseIn: CGRect(
+                x: frame.midX - frame.width * 0.18,
+                y: midY - frame.width * 0.18,
+                width: frame.width * 0.36,
+                height: frame.width * 0.36
+            ),
+            transform: nil
+        )
+
+        let goalMinX = scenePoint(for: Vector2(x: config.goalMouthMinX, y: 0), config: config, rinkFrame: frame).x
+        let goalMaxX = scenePoint(for: Vector2(x: config.goalMouthMaxX, y: 0), config: config, rinkFrame: frame).x
+        topGoalNode.path = linePath(from: CGPoint(x: goalMinX, y: frame.maxY), to: CGPoint(x: goalMaxX, y: frame.maxY))
+        bottomGoalNode.path = linePath(from: CGPoint(x: goalMinX, y: frame.minY), to: CGPoint(x: goalMaxX, y: frame.minY))
+
+        homeStrikerNode.path = discPath(radius: config.strikerRadius * scale)
+        homeStrikerNode.position = scenePoint(for: state.homePlayer.position, config: config, rinkFrame: frame)
+        awayStrikerNode.path = discPath(radius: config.strikerRadius * scale)
+        awayStrikerNode.position = scenePoint(for: state.awayPlayer.position, config: config, rinkFrame: frame)
+        puckNode.path = discPath(radius: config.puckRadius * scale)
+        puckNode.position = scenePoint(for: state.puck.position, config: config, rinkFrame: frame)
 
         scoreLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 12)
         scoreLabel.text = "\(state.score.home) - \(state.score.away)"
 
-        timeLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 42)
+        timeLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 44)
         timeLabel.text = "Time \(Int(state.remainingTime.rounded(.up)))"
     }
 
-    private func updateGoalMouths(config: MatchConfig, rinkFrame: CGRect) {
-        let leftStart = scenePoint(
-            for: Vector2(x: config.leftGoalBoundaryX, y: config.goalMouthMinY),
-            config: config,
-            rinkFrame: rinkFrame
-        )
-        let leftEnd = scenePoint(
-            for: Vector2(x: config.leftGoalBoundaryX, y: config.goalMouthMaxY),
-            config: config,
-            rinkFrame: rinkFrame
-        )
-        leftGoalMouthNode.path = linePath(from: leftStart, to: leftEnd)
-
-        let rightStart = scenePoint(
-            for: Vector2(x: config.rightGoalBoundaryX, y: config.goalMouthMinY),
-            config: config,
-            rinkFrame: rinkFrame
-        )
-        let rightEnd = scenePoint(
-            for: Vector2(x: config.rightGoalBoundaryX, y: config.goalMouthMaxY),
-            config: config,
-            rinkFrame: rinkFrame
-        )
-        rightGoalMouthNode.path = linePath(from: rightStart, to: rightEnd)
-    }
-
     private func rinkFrame(for config: MatchConfig) -> CGRect {
-        let horizontalPadding: CGFloat = 24
+        let horizontalPadding: CGFloat = 16
         let topPadding: CGFloat = 76
         let bottomPadding: CGFloat = 24
         let availableSize = CGSize(
@@ -270,32 +235,14 @@ final class RinkScene: SKScene {
         )
     }
 
+    private func discPath(radius: CGFloat) -> CGPath {
+        CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2), transform: nil)
+    }
+
     private func linePath(from start: CGPoint, to end: CGPoint) -> CGPath {
         let path = CGMutablePath()
         path.move(to: start)
         path.addLine(to: end)
         return path
-    }
-}
-
-private extension CGPoint {
-    var length: Double {
-        Double((x * x + y * y).squareRoot())
-    }
-
-    var normalized: Vector2 {
-        let currentLength = length
-        guard currentLength > 0 else {
-            return .zero
-        }
-
-        return Vector2(
-            x: Double(x) / currentLength,
-            y: Double(y) / currentLength
-        )
-    }
-
-    static func - (lhs: CGPoint, rhs: CGPoint) -> CGPoint {
-        CGPoint(x: lhs.x - rhs.x, y: lhs.y - rhs.y)
     }
 }
