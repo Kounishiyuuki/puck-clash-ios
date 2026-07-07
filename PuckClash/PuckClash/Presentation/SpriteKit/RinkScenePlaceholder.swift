@@ -2,14 +2,16 @@ import SpriteKit
 
 final class RinkScene: SKScene {
     private var engine: GameEngine
-    private let onFinished: ((ScoreState) -> Void)?
-    private let onHUDChange: ((MatchHUD) -> Void)?
+    // Handlers and stick input are set by the SwiftUI layer after creation; the
+    // scene stays free of SwiftUI and holds no game rules.
+    var onFinished: ((ScoreState) -> Void)?
+    var onHUDChange: ((MatchHUD) -> Void)?
+    var homeMoveVector: Vector2?
     private var hasNotifiedFinish = false
     private var lastHUD: MatchHUD?
     private var lastScore: ScoreState?
     private var lastPuckSpeed: Double = 0
     private var lastUpdateTime: TimeInterval?
-    private var touchScenePoint: CGPoint?
 
     private let rinkNode = SKShapeNode()
     private let iceBandNode = SKShapeNode()
@@ -33,21 +35,13 @@ final class RinkScene: SKScene {
 
     // SpriteKit owns no match rules; it drives GameCore, reports the final score
     // (onFinished) and, at most once per changed value, the HUD snapshot (onHUDChange).
-    init(
-        config: MatchConfig = .standard,
-        onFinished: ((ScoreState) -> Void)? = nil,
-        onHUDChange: ((MatchHUD) -> Void)? = nil
-    ) {
+    init(config: MatchConfig = .standard) {
         self.engine = GameEngine(state: .initial(config: config))
-        self.onFinished = onFinished
-        self.onHUDChange = onHUDChange
         super.init(size: CGSize(width: config.rinkSize.x, height: config.rinkSize.y))
     }
 
     required init?(coder aDecoder: NSCoder) {
         self.engine = GameEngine()
-        self.onFinished = nil
-        self.onHUDChange = nil
         super.init(coder: aDecoder)
     }
 
@@ -133,41 +127,14 @@ final class RinkScene: SKScene {
         )
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchScenePoint = touches.first?.location(in: self)
-    }
-
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchScenePoint = touches.first?.location(in: self)
-    }
-
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchScenePoint = nil
-    }
-
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        touchScenePoint = nil
-    }
-
-    // Finger position becomes the home striker's target; GameCore confines it to
-    // the lower half. SpriteKit only translates the touch, it applies no rules.
+    // Home input comes from the SwiftUI joystick as a velocity-style vector; GameCore
+    // confines the striker to the lower half. Direct rink dragging is not used.
     private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
-        guard let touchScenePoint, size.width > 0, size.height > 0 else {
+        guard let homeMoveVector, homeMoveVector != .zero else {
             return []
         }
 
-        let config = engine.state.config
-        let frame = rinkFrame(for: config)
-        guard frame.width > 0, frame.height > 0 else {
-            return []
-        }
-
-        let target = Vector2(
-            x: Double((touchScenePoint.x - frame.minX) / frame.width) * config.rinkSize.x,
-            y: Double((touchScenePoint.y - frame.minY) / frame.height) * config.rinkSize.y
-        )
-
-        return [PlayerInput(playerId: .home, targetPosition: target, timestamp: timestamp)]
+        return [PlayerInput(playerId: .home, moveVector: homeMoveVector, timestamp: timestamp)]
     }
 
     private func buildScene() {
@@ -309,11 +276,11 @@ final class RinkScene: SKScene {
     }
 
     private func rinkFrame(for config: MatchConfig) -> CGRect {
-        // Top padding clears the status bar / HUD; the larger bottom padding
-        // reserves a control zone for the skill button row.
-        let horizontalPadding: CGFloat = 16
-        let topPadding: CGFloat = 112
-        let bottomPadding: CGFloat = 172
+        // Minimal side padding widens the rink; the top clears the HUD and the
+        // bottom reserves the joystick / skill control zone.
+        let horizontalPadding: CGFloat = 8
+        let topPadding: CGFloat = 100
+        let bottomPadding: CGFloat = 156
         let availableSize = CGSize(
             width: max(1, size.width - horizontalPadding * 2),
             height: max(1, size.height - topPadding - bottomPadding)

@@ -88,6 +88,63 @@ struct PuckClashTests {
         #expect(engine.state.homePlayer.position == Vector2(x: 50, y: 30))
     }
 
+    // MARK: - moveVector (joystick) input
+
+    @Test func moveVectorMovesHomeStriker() {
+        var engine = GameEngine(state: .initial(config: config))
+
+        // Unit vector (0.6,-0.8); step = vector * strikerMaxSpeed(1000) * dt(0.01) = (6,-8).
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 0.6, y: -0.8), timestamp: 1)]
+        )
+
+        #expect(engine.state.homePlayer.position == Vector2(x: 56, y: 32))
+    }
+
+    @Test func moveVectorMagnitudeIsClampedToOne() {
+        var engine = GameEngine(state: .initial(config: config))
+
+        // Magnitude 5 along +x is clamped to a unit vector, so step is 1000*0.01 = 10.
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 5, y: 0), timestamp: 1)]
+        )
+
+        #expect(engine.state.homePlayer.position == Vector2(x: 60, y: 40))
+    }
+
+    @Test func moveVectorHomeStillClampsToLowerHalf() {
+        var engine = GameEngine(state: .initial(config: config))
+
+        // Push straight up hard; home is confined to the lower half (y <= 100).
+        engine.update(
+            deltaTime: 1,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 0, y: 1), timestamp: 1)]
+        )
+
+        #expect(engine.state.homePlayer.position.y <= config.rinkCenter.y)
+    }
+
+    @Test func moveVectorTakesPrecedenceOverTargetPosition() {
+        var engine = GameEngine(state: .initial(config: config))
+
+        // Both provided: moveVector (+x) wins, targetPosition (toward -y) is ignored.
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [
+                PlayerInput(
+                    playerId: .home,
+                    moveVector: Vector2(x: 1, y: 0),
+                    targetPosition: Vector2(x: 50, y: 10),
+                    timestamp: 1
+                )
+            ]
+        )
+
+        #expect(engine.state.homePlayer.position == Vector2(x: 60, y: 40))
+    }
+
     // MARK: - Free puck
 
     @Test func puckMovesFreelyByVelocity() {
