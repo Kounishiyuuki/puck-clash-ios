@@ -181,7 +181,7 @@ struct PuckClashTests {
         #expect(engine.state.puck.velocity == Vector2(x: 0, y: -100))
     }
 
-    @Test func leftAndRightWallsReflect() {
+    @Test func leftWallReflects() {
         var state = GameState.initial(config: config)
         state.puck.position = Vector2(x: 5, y: 100)
         state.puck.velocity = Vector2(x: -10, y: 0)
@@ -192,6 +192,35 @@ struct PuckClashTests {
         #expect(engine.state.score == .zero)
         #expect(engine.state.puck.position == Vector2(x: 5, y: 100))
         #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
+    }
+
+    @Test func rightWallReflects() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 95, y: 100)
+        state.puck.velocity = Vector2(x: 10, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        // next.x = 105 mirrors to 2*100-105 = 95, x velocity flips.
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 95, y: 100))
+        #expect(engine.state.puck.velocity == Vector2(x: -10, y: 0))
+    }
+
+    @Test func outsideBottomGoalMouthReflectsInsteadOfScoring() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 10, y: 10)
+        state.puck.velocity = Vector2(x: 0, y: -20)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        // x=10 is outside the mouth [30,70]: next.y = -10 mirrors to 10 and the
+        // y velocity flips, so the puck reflects off the bottom wall, no goal.
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.position == Vector2(x: 10, y: 10))
+        #expect(engine.state.puck.velocity == Vector2(x: 0, y: 20))
     }
 
     @Test func goalResetsPuckAndStrikers() {

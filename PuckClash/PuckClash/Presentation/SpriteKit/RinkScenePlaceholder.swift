@@ -195,17 +195,20 @@ final class RinkScene: SKScene {
         puckNode.path = discPath(radius: config.puckRadius * scale)
         puckNode.position = scenePoint(for: state.puck.position, config: config, rinkFrame: frame)
 
-        scoreLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 12)
+        // Sit the HUD below the status bar; score is the headline, time sits under it.
+        scoreLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 54)
         scoreLabel.text = "\(state.score.home) - \(state.score.away)"
 
-        timeLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 44)
+        timeLabel.position = CGPoint(x: size.width * 0.5, y: size.height - 88)
         timeLabel.text = "Time \(Int(state.remainingTime.rounded(.up)))"
     }
 
     private func rinkFrame(for config: MatchConfig) -> CGRect {
+        // Top padding clears the status bar and leaves room for the HUD; the larger
+        // bottom padding reserves a control zone for future skill/action buttons.
         let horizontalPadding: CGFloat = 16
-        let topPadding: CGFloat = 76
-        let bottomPadding: CGFloat = 24
+        let topPadding: CGFloat = 112
+        let bottomPadding: CGFloat = 128
         let availableSize = CGSize(
             width: max(1, size.width - horizontalPadding * 2),
             height: max(1, size.height - topPadding - bottomPadding)

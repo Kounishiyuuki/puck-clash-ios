@@ -117,11 +117,12 @@ struct MatchConfig: Equatable {
     static let standard = MatchConfig(
         rinkSize: Vector2(x: 360, y: 640),
         matchDuration: 180,
-        strikerMaxSpeed: 1200,
+        strikerMaxSpeed: 750,
         goalMouthHalfWidth: 96,
         strikerRadius: 30,
         puckRadius: 16,
-        puckDamping: 0.6,
+        strikerHitRestitution: 0.85,
+        puckDamping: 0.5,
         puckStopSpeed: 6
     )
 }
