@@ -6,8 +6,12 @@ struct RinkSceneView: View {
     // rebuilds the scene, which recreates the underlying GameEngine for a fresh match.
     @State private var scene: RinkScene
 
-    init(config: MatchConfig = .standard, onFinished: ((ScoreState) -> Void)? = nil) {
-        _scene = State(initialValue: RinkScene(config: config, onFinished: onFinished))
+    init(
+        config: MatchConfig = .standard,
+        onFinished: ((ScoreState) -> Void)? = nil,
+        onHUDChange: ((MatchHUD) -> Void)? = nil
+    ) {
+        _scene = State(initialValue: RinkScene(config: config, onFinished: onFinished, onHUDChange: onHUDChange))
     }
 
     var body: some View {
