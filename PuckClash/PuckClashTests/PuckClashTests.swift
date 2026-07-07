@@ -886,4 +886,19 @@ struct PuckClashTests {
 
         #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
     }
+
+    // MARK: - Score winner
+
+    @Test func winnerIsHomeWhenHomeScoresMore() {
+        #expect(ScoreState(home: 3, away: 1).winner == .home)
+    }
+
+    @Test func winnerIsAwayWhenAwayScoresMore() {
+        #expect(ScoreState(home: 0, away: 2).winner == .away)
+    }
+
+    @Test func winnerIsNilOnDraw() {
+        #expect(ScoreState(home: 2, away: 2).winner == nil)
+        #expect(ScoreState.zero.winner == nil)
+    }
 }

@@ -34,6 +34,18 @@ struct ScoreState: Equatable {
     var away: Int
 
     static let zero = ScoreState(home: 0, away: 0)
+
+    // Match winner by final score; nil means a draw. Owned by GameCore so the
+    // presentation layer only renders the outcome, never decides it.
+    var winner: PlayerSide? {
+        if home > away {
+            return .home
+        }
+        if away > home {
+            return .away
+        }
+        return nil
+    }
 }
 
 enum MatchPhase: Equatable {

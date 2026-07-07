@@ -1,13 +1,29 @@
 import SpriteKit
 
 final class RinkScene: SKScene {
-    private var engine = GameEngine()
+    private var engine: GameEngine
+    private let onFinished: ((ScoreState) -> Void)?
+    private var hasNotifiedFinish = false
     private var lastUpdateTime: TimeInterval?
     private var touchStartPoint: CGPoint?
     private var touchCurrentPoint: CGPoint?
     private var pendingShot = false
 
     private static let dragActivationDistance: Double = 8
+
+    // SpriteKit owns no match rules; it drives GameCore and reports the final
+    // score once the match finishes so SwiftUI can navigate to the result screen.
+    init(config: MatchConfig = .standard, onFinished: ((ScoreState) -> Void)? = nil) {
+        self.engine = GameEngine(state: .initial(config: config))
+        self.onFinished = onFinished
+        super.init(size: CGSize(width: config.rinkSize.x, height: config.rinkSize.y))
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        self.engine = GameEngine()
+        self.onFinished = nil
+        super.init(coder: aDecoder)
+    }
 
     private let rinkNode = SKShapeNode()
     private let leftGoalMouthNode = SKShapeNode()
@@ -36,6 +52,18 @@ final class RinkScene: SKScene {
 
         engine.update(deltaTime: min(deltaTime, 1.0 / 30.0), inputs: playerInputs(at: currentTime))
         render(engine.state)
+        notifyIfFinished()
+    }
+
+    // SKScene.update runs on the main thread, so invoking the SwiftUI-provided
+    // closure here is safe. Fire exactly once on the transition to finished.
+    private func notifyIfFinished() {
+        guard !hasNotifiedFinish, engine.state.phase == .finished else {
+            return
+        }
+
+        hasNotifiedFinish = true
+        onFinished?(engine.state.score)
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
