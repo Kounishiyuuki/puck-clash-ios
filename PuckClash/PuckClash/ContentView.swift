@@ -175,14 +175,16 @@ private struct JoystickView: View {
     let onMove: (Vector2) -> Void
     @State private var knobOffset: CGSize = .zero
 
-    private let radius: CGFloat = 52
-    private let knobSize: CGFloat = 46
+    private let radius: CGFloat = 64
+    private let knobSize: CGFloat = 58
+    // Ignore tiny thumb jitter, then ease the low end so small tilts still respond.
+    private let deadZone: Double = 0.12
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(.white.opacity(0.06))
-                .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 2))
+                .fill(.white.opacity(0.07))
+                .overlay(Circle().strokeBorder(.white.opacity(0.24), lineWidth: 2))
             Circle()
                 .fill(Palette.home.opacity(0.85))
                 .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 2))
@@ -194,15 +196,29 @@ private struct JoystickView: View {
         .gesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { value in
-                    var dx = value.translation.width
-                    var dy = value.translation.height
-                    let length = sqrt(dx * dx + dy * dy)
-                    if length > radius {
-                        dx = dx / length * radius
-                        dy = dy / length * radius
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    let length = hypot(dx, dy)
+                    let clampedLength = min(length, radius)
+
+                    if length > 0 {
+                        knobOffset = CGSize(width: dx / length * clampedLength, height: dy / length * clampedLength)
+                    } else {
+                        knobOffset = .zero
                     }
-                    knobOffset = CGSize(width: dx, height: dy)
-                    onMove(Vector2(x: Double(dx / radius), y: Double(-dy / radius)))
+
+                    let magnitude = Double(clampedLength / radius)
+                    guard length > 0, magnitude >= deadZone else {
+                        onMove(.zero)
+                        return
+                    }
+
+                    // Remap [deadZone, 1] -> [0, 1] and ease so small pushes still move.
+                    let normalized = (magnitude - deadZone) / (1 - deadZone)
+                    let response = pow(normalized, 0.75)
+                    let directionX = Double(dx / length)
+                    let directionY = Double(dy / length)
+                    onMove(Vector2(x: directionX * response, y: -directionY * response))
                 }
                 .onEnded { _ in
                     knobOffset = .zero
