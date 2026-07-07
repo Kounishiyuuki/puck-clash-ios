@@ -5,6 +5,7 @@
 //  Created by yuuki kounishi on 2026/06/24.
 //
 
+import Combine
 import SwiftUI
 
 enum MatchFlow {
@@ -19,6 +20,28 @@ struct MatchHUD: Equatable {
     var homeScore = 0
     var awayScore = 0
     var remainingSeconds = 0
+}
+
+// Owns a single RinkScene shared by the SpriteView and the joystick, and republishes
+// the low-frequency HUD snapshot. It carries no game rules.
+final class MatchController: ObservableObject {
+    let scene: RinkScene
+    @Published var hud = MatchHUD()
+
+    init(onFinished: @escaping (ScoreState) -> Void) {
+        let scene = RinkScene(config: .standard)
+        self.scene = scene
+        scene.onFinished = onFinished
+        scene.onHUDChange = { [weak self] snapshot in
+            self?.hud = snapshot
+        }
+    }
+
+    // Joystick vector goes straight to the scene (not through @Published) so dragging
+    // does not re-render SwiftUI every frame.
+    func setMoveVector(_ vector: Vector2) {
+        scene.homeMoveVector = vector == .zero ? nil : vector
+    }
 }
 
 private enum Palette {
@@ -49,7 +72,7 @@ struct ContentView: View {
         }
     }
 
-    // A new match identity forces RinkSceneView to rebuild its scene/engine.
+    // A new match identity rebuilds the controller (and its scene/engine).
     private func startMatch() {
         matchID = UUID()
         flow = .match
@@ -68,20 +91,22 @@ private struct ArenaBackground: View {
 }
 
 struct MatchView: View {
-    let onFinished: (ScoreState) -> Void
-    @State private var hud = MatchHUD()
+    @StateObject private var controller: MatchController
+
+    init(onFinished: @escaping (ScoreState) -> Void) {
+        _controller = StateObject(wrappedValue: MatchController(onFinished: onFinished))
+    }
 
     var body: some View {
         ZStack {
             ArenaBackground()
-
-            RinkSceneView(onFinished: onFinished, onHUDChange: { hud = $0 })
+            RinkSceneView(scene: controller.scene)
         }
         .safeAreaInset(edge: .top) {
-            MatchHUDBar(hud: hud)
+            MatchHUDBar(hud: controller.hud)
         }
         .safeAreaInset(edge: .bottom) {
-            SkillSlotBar()
+            BottomControls(onMove: { controller.setMoveVector($0) })
         }
     }
 }
@@ -129,32 +154,88 @@ private struct MatchHUDBar: View {
     }
 }
 
-// Visual-only placeholder for future skills. Disabled; tapping does nothing and
-// no game rule is attached.
-private struct SkillSlotBar: View {
+// Bottom control zone: joystick on the left, skill placeholders on the right.
+private struct BottomControls: View {
+    let onMove: (Vector2) -> Void
+
+    var body: some View {
+        HStack(alignment: .center) {
+            JoystickView(onMove: onMove)
+            Spacer()
+            SkillSlots()
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 10)
+    }
+}
+
+// Fixed virtual joystick. Produces a 0...1 magnitude vector in GameCore rink
+// orientation (y up); returns to neutral on release. Holds no game rules.
+private struct JoystickView: View {
+    let onMove: (Vector2) -> Void
+    @State private var knobOffset: CGSize = .zero
+
+    private let radius: CGFloat = 52
+    private let knobSize: CGFloat = 46
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.white.opacity(0.06))
+                .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 2))
+            Circle()
+                .fill(Palette.home.opacity(0.85))
+                .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 2))
+                .frame(width: knobSize, height: knobSize)
+                .offset(knobOffset)
+        }
+        .frame(width: radius * 2, height: radius * 2)
+        .contentShape(Circle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    var dx = value.translation.width
+                    var dy = value.translation.height
+                    let length = sqrt(dx * dx + dy * dy)
+                    if length > radius {
+                        dx = dx / length * radius
+                        dy = dy / length * radius
+                    }
+                    knobOffset = CGSize(width: dx, height: dy)
+                    onMove(Vector2(x: Double(dx / radius), y: Double(-dy / radius)))
+                }
+                .onEnded { _ in
+                    knobOffset = .zero
+                    onMove(.zero)
+                }
+        )
+        .accessibilityIdentifier("joystick-control")
+    }
+}
+
+// Visual-only placeholders for future skills. Disabled; no game rule attached.
+private struct SkillSlots: View {
     private let slots = ["Boost", "Block", "Shot"]
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             ForEach(slots, id: \.self) { name in
-                VStack(spacing: 6) {
+                VStack(spacing: 4) {
                     Circle()
                         .strokeBorder(.white.opacity(0.18), lineWidth: 2)
                         .background(Circle().fill(.white.opacity(0.05)))
-                        .frame(width: 56, height: 56)
+                        .frame(width: 46, height: 46)
                         .overlay(
                             Image(systemName: "lock.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 13))
                                 .foregroundStyle(.white.opacity(0.3))
                         )
                     Text(name)
-                        .font(.caption2.weight(.medium))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.45))
                 }
             }
         }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
         .disabled(true)
     }
 }

@@ -28,8 +28,18 @@ struct GameEngine {
         let homeInput = latestInput(for: .home, in: inputs)
         let awayInput = latestInput(for: .away, in: inputs) ?? awayCPUInput()
 
-        state.homePlayer = movedStriker(state.homePlayer, target: homeInput?.targetPosition, deltaTime: deltaTime)
-        state.awayPlayer = movedStriker(state.awayPlayer, target: awayInput.targetPosition, deltaTime: deltaTime)
+        state.homePlayer = movedStriker(
+            state.homePlayer,
+            moveVector: homeInput?.moveVector,
+            target: homeInput?.targetPosition,
+            deltaTime: deltaTime
+        )
+        state.awayPlayer = movedStriker(
+            state.awayPlayer,
+            moveVector: awayInput.moveVector,
+            target: awayInput.targetPosition,
+            deltaTime: deltaTime
+        )
 
         resolveStrikerPuckCollision(with: state.homePlayer)
         resolveStrikerPuckCollision(with: state.awayPlayer)
@@ -43,18 +53,25 @@ struct GameEngine {
             .max { $0.timestamp < $1.timestamp }
     }
 
-    // Strikers follow a target position (finger for home, CPU for away), capped by
-    // strikerMaxSpeed and confined to the player's own half. Velocity is derived
-    // from the actual displacement so the collision impulse reflects real motion.
+    // Strikers move from a velocity-style stick vector (home) or by following a
+    // target position (away CPU / legacy), capped by strikerMaxSpeed and confined
+    // to the player's own half. Velocity is derived from the actual displacement so
+    // the collision impulse reflects real motion. moveVector takes precedence.
     private func movedStriker(
         _ striker: PlayerState,
+        moveVector: Vector2?,
         target: Vector2?,
         deltaTime: TimeInterval
     ) -> PlayerState {
         var updated = striker
         var newPosition = striker.position
 
-        if let target {
+        if let moveVector {
+            // Treat magnitude as 0...1; anything longer is clamped to a unit vector.
+            let bounded = moveVector.length > 1 ? moveVector.normalized : moveVector
+            let step = bounded * (state.config.strikerMaxSpeed * deltaTime)
+            newPosition = clampedToHalf(striker.position + step, side: striker.side)
+        } else if let target {
             let desired = clampedToHalf(target, side: striker.side)
             let toTarget = desired - striker.position
             let maxStep = state.config.strikerMaxSpeed * deltaTime

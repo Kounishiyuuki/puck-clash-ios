@@ -1,18 +1,10 @@
 import SwiftUI
 import SpriteKit
 
+// Thin wrapper that displays a RinkScene owned by the match controller, so the
+// joystick and the SpriteView share the same scene instance.
 struct RinkSceneView: View {
-    // @State keeps one scene per view identity; a new identity (via .id on retry)
-    // rebuilds the scene, which recreates the underlying GameEngine for a fresh match.
-    @State private var scene: RinkScene
-
-    init(
-        config: MatchConfig = .standard,
-        onFinished: ((ScoreState) -> Void)? = nil,
-        onHUDChange: ((MatchHUD) -> Void)? = nil
-    ) {
-        _scene = State(initialValue: RinkScene(config: config, onFinished: onFinished, onHUDChange: onHUDChange))
-    }
+    let scene: RinkScene
 
     var body: some View {
         SpriteView(scene: scene)

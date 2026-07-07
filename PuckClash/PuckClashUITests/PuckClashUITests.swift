@@ -44,6 +44,20 @@ final class PuckClashUITests: XCTestCase {
     }
 
     @MainActor
+    func testJoystickAppearsAfterStart() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let startButton = app.buttons["start-match-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        // The match screen shows the fixed virtual joystick.
+        let joystick = app.otherElements["joystick-control"]
+        XCTAssertTrue(joystick.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
