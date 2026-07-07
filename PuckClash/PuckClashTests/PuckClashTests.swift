@@ -196,6 +196,17 @@ struct PuckClashTests {
         )
     }
 
+    private var frictionConfig: MatchConfig {
+        MatchConfig(
+            rinkSize: Vector2(x: 100, y: 50),
+            matchDuration: 10,
+            playerSpeed: 20,
+            goalMouthHalfHeight: 10,
+            puckDamping: 0.25,
+            puckStopSpeed: 5
+        )
+    }
+
     @Test func homeGainsPossessionWhenCloseToPuck() {
         var state = GameState.initial(config: possessionConfig)
         state.homePlayer.position = Vector2(x: 47, y: 25)
@@ -774,5 +785,105 @@ struct PuckClashTests {
         #expect(engine.state.phase == .finished)
         #expect(engine.state.puck.position == Vector2(x: 99, y: 5))
         #expect(engine.state.puck.velocity == Vector2(x: 100, y: 0))
+    }
+
+    // MARK: - Puck friction / damping
+
+    @Test func freePuckVelocityDecreasesWithDamping() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.position = Vector2(x: 50, y: 25)
+        state.puck.velocity = Vector2(x: 40, y: 0)
+        var engine = GameEngine(state: state)
+
+        // pow(0.25, 1) = 0.25, so 40 -> 10 (still above stop speed 5).
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.puck.position == Vector2(x: 90, y: 25))
+        #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
+    }
+
+    @Test func puckStopsBelowStopSpeed() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.position = Vector2(x: 10, y: 40)
+        state.puck.velocity = Vector2(x: 4, y: 0)
+        var engine = GameEngine(state: state)
+
+        // 4 -> 1 after damping, which is below stop speed 5, so it snaps to zero.
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func possessedPuckIsNotDamped() {
+        var state = GameState.initial(config: frictionConfig)
+        state.possession = .home
+        state.homePlayer.position = Vector2(x: 30, y: 25)
+        state.puck.velocity = Vector2(x: 40, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.possession == .home)
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func goalResetKeepsVelocityZeroWithDamping() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.position = Vector2(x: 90, y: 25)
+        state.puck.velocity = Vector2(x: 60, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score.home == 1)
+        #expect(engine.state.puck.velocity == .zero)
+    }
+
+    @Test func wallReflectionThenDampingApplies() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.position = Vector2(x: 99, y: 5)
+        state.puck.velocity = Vector2(x: 40, y: 0)
+        var engine = GameEngine(state: state)
+
+        // Reflects x (restitution 1.0) to -40, then damping (0.25) scales it to -10.
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.puck.velocity == Vector2(x: -10, y: 0))
+    }
+
+    @Test func buzzerFrameDoesNotDampPuck() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.velocity = Vector2(x: 40, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 10, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.puck.velocity == Vector2(x: 40, y: 0))
+        #expect(engine.state.puck.position == Vector2(x: 50, y: 25))
+    }
+
+    @Test func scoringStillWorksWithDamping() {
+        var state = GameState.initial(config: frictionConfig)
+        state.puck.position = Vector2(x: 95, y: 25)
+        state.puck.velocity = Vector2(x: 40, y: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.score.home == 1)
+    }
+
+    @Test func defaultConfigAppliesNoDamping() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 30, y: 25)
+        state.puck.velocity = Vector2(x: 10, y: 0)
+        var engine = GameEngine(state: state)
+
+        // Default puckDamping 1.0 / puckStopSpeed 0 leaves the puck velocity unchanged.
+        engine.update(deltaTime: 1, inputs: [])
+
+        #expect(engine.state.puck.velocity == Vector2(x: 10, y: 0))
     }
 }

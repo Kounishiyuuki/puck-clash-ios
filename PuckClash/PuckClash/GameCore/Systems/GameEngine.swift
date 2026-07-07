@@ -200,6 +200,21 @@ struct GameEngine {
         }
 
         reflectPuckOffWalls(nextPosition: nextPosition)
+        dampPuckVelocity(deltaTime: deltaTime)
+    }
+
+    // Apply exponential friction to the free/shot puck after any wall reflection,
+    // then snap to rest below the stop speed. Position for this frame was already
+    // computed from the pre-damped velocity, so only future travel decelerates.
+    private mutating func dampPuckVelocity(deltaTime: TimeInterval) {
+        let dampingFactor = pow(state.config.puckDamping, deltaTime)
+        let dampedVelocity = state.puck.velocity * dampingFactor
+
+        if dampedVelocity.length < state.config.puckStopSpeed {
+            state.puck.velocity = .zero
+        } else {
+            state.puck.velocity = dampedVelocity
+        }
     }
 
     // Mirror the puck off any boundary it overshoots and flip that axis' velocity
