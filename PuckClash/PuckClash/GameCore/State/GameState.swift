@@ -129,6 +129,65 @@ struct MatchConfig: Equatable {
     )
 }
 
+enum MapID: String, CaseIterable, Equatable {
+    case classic
+    case wide
+    case speed
+}
+
+// A selectable map is just a named MatchConfig preset. All values are symmetric
+// (MatchConfig has no per-side fields), so no map favors one player — important
+// for future online fairness. Shared by CPU and (later) online match flows.
+struct MapDefinition: Equatable, Identifiable {
+    let id: MapID
+    let displayName: String
+    let summary: String
+    let config: MatchConfig
+
+    static let classic = MapDefinition(
+        id: .classic,
+        displayName: "Classic",
+        summary: "Balanced standard rink",
+        config: .standard
+    )
+
+    static let wide = MapDefinition(
+        id: .wide,
+        displayName: "Wide",
+        summary: "Wider board, more shooting angles",
+        config: MatchConfig(
+            rinkSize: Vector2(x: 560, y: 640),
+            matchDuration: 180,
+            strikerMaxSpeed: 700,
+            goalMouthHalfWidth: 150,
+            strikerRadius: 30,
+            puckRadius: 16,
+            strikerHitRestitution: 0.75,
+            puckDamping: 0.62,
+            puckStopSpeed: 7
+        )
+    )
+
+    static let speed = MapDefinition(
+        id: .speed,
+        displayName: "Speed",
+        summary: "Faster strikers and a livelier puck",
+        config: MatchConfig(
+            rinkSize: Vector2(x: 500, y: 640),
+            matchDuration: 180,
+            strikerMaxSpeed: 820,
+            goalMouthHalfWidth: 133,
+            strikerRadius: 28,
+            puckRadius: 15,
+            strikerHitRestitution: 0.85,
+            puckDamping: 0.72,
+            puckStopSpeed: 6
+        )
+    )
+
+    static let all: [MapDefinition] = [.classic, .wide, .speed]
+}
+
 struct GameState: Equatable {
     let config: MatchConfig
     var phase: MatchPhase
