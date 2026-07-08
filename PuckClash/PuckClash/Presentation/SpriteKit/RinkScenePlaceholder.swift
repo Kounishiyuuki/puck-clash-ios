@@ -286,14 +286,16 @@ final class RinkScene: SKScene {
             height: max(1, size.height - topPadding - bottomPadding)
         )
         let rinkAspect = config.rinkSize.x / config.rinkSize.y
-        let availableAspect = availableSize.width / availableSize.height
 
-        let rinkSize: CGSize
-        if availableAspect > rinkAspect {
-            rinkSize = CGSize(width: availableSize.height * rinkAspect, height: availableSize.height)
-        } else {
-            rinkSize = CGSize(width: availableSize.width, height: availableSize.width / rinkAspect)
+        // Width-first: fill the available width, and only shrink if the resulting
+        // height would exceed the available height (then it is height-bound).
+        var rinkWidth = availableSize.width
+        var rinkHeight = rinkWidth / rinkAspect
+        if rinkHeight > availableSize.height {
+            rinkHeight = availableSize.height
+            rinkWidth = rinkHeight * rinkAspect
         }
+        let rinkSize = CGSize(width: rinkWidth, height: rinkHeight)
 
         return CGRect(
             x: (size.width - rinkSize.width) * 0.5,

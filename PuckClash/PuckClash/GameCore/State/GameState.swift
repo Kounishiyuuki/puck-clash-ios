@@ -114,13 +114,13 @@ struct MatchConfig: Equatable {
         Vector2(x: rinkCenter.x, y: rinkSize.y * 0.8)
     }
 
-    // Wider board (420x640 ~ 2:3) so the rink fills the screen width under the
-    // portrait HUD / control bands; goal mouth is scaled to keep its width ratio.
+    // Wide board (500x640) so a width-first layout fills the screen width while
+    // leaving vertical room for the HUD / control bands; goal mouth keeps its ratio.
     static let standard = MatchConfig(
-        rinkSize: Vector2(x: 420, y: 640),
+        rinkSize: Vector2(x: 500, y: 640),
         matchDuration: 180,
         strikerMaxSpeed: 620,
-        goalMouthHalfWidth: 112,
+        goalMouthHalfWidth: 133,
         strikerRadius: 30,
         puckRadius: 16,
         strikerHitRestitution: 0.78,
