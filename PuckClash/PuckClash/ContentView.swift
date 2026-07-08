@@ -8,10 +8,17 @@
 import Combine
 import SwiftUI
 
+enum GameMode {
+    case cpuPractice
+    case online
+}
+
 enum MatchFlow {
     case start
-    case match
-    case result(ScoreState)
+    case modeSelect
+    case mapSelect(GameMode)
+    case match(MapDefinition)
+    case result(ScoreState, MapDefinition)
 }
 
 // Plain value snapshot the SpriteKit scene pushes to the SwiftUI HUD. Holds no
@@ -28,8 +35,8 @@ final class MatchController: ObservableObject {
     let scene: RinkScene
     @Published var hud = MatchHUD()
 
-    init(onFinished: @escaping (ScoreState) -> Void) {
-        let scene = RinkScene(config: .standard)
+    init(config: MatchConfig, onFinished: @escaping (ScoreState) -> Void) {
+        let scene = RinkScene(config: config)
         self.scene = scene
         scene.onFinished = onFinished
         scene.onHUDChange = { [weak self] snapshot in
@@ -59,23 +66,33 @@ struct ContentView: View {
     var body: some View {
         switch flow {
         case .start:
-            StartView(onStart: startMatch)
-        case .match:
-            MatchView(onFinished: { score in flow = .result(score) })
+            StartView(onStart: { flow = .modeSelect })
+        case .modeSelect:
+            ModeSelectView(
+                onSelectCPU: { flow = .mapSelect(.cpuPractice) },
+                onBack: { flow = .start }
+            )
+        case .mapSelect:
+            MapSelectView(
+                onSelectMap: { map in startMatch(map) },
+                onBack: { flow = .modeSelect }
+            )
+        case .match(let map):
+            MatchView(map: map, onFinished: { score in flow = .result(score, map) })
                 .id(matchID)
-        case .result(let score):
+        case .result(let score, let map):
             ResultView(
                 score: score,
-                onRetry: startMatch,
+                onRetry: { startMatch(map) },
                 onBackToTitle: { flow = .start }
             )
         }
     }
 
     // A new match identity rebuilds the controller (and its scene/engine).
-    private func startMatch() {
+    private func startMatch(_ map: MapDefinition) {
         matchID = UUID()
-        flow = .match
+        flow = .match(map)
     }
 }
 
@@ -90,11 +107,149 @@ private struct ArenaBackground: View {
     }
 }
 
+private struct ModeSelectView: View {
+    let onSelectCPU: () -> Void
+    let onBack: () -> Void
+    @State private var showComingSoon = false
+
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 18) {
+                Text("Select Mode")
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 4)
+
+                SelectionCard(
+                    title: "CPU Practice",
+                    subtitle: "Play offline against the CPU",
+                    accent: Palette.home,
+                    dimmed: false,
+                    action: onSelectCPU
+                )
+                .accessibilityIdentifier("mode-cpu-practice")
+
+                SelectionCard(
+                    title: "Online Match",
+                    subtitle: "Coming soon",
+                    accent: Palette.away,
+                    dimmed: true,
+                    action: { showComingSoon = true }
+                )
+                .accessibilityIdentifier("mode-online-match")
+
+                Button("Back", action: onBack)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 8)
+            }
+            .padding()
+        }
+        .sheet(isPresented: $showComingSoon) {
+            ComingSoonView()
+        }
+    }
+}
+
+private struct ComingSoonView: View {
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 14) {
+                Image(systemName: "wifi")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Palette.accent)
+                Text("Online Match")
+                    .font(.title.weight(.heavy))
+                    .foregroundStyle(.white)
+                Text("Coming soon — online multiplayer is still in development. For now, enjoy CPU Practice.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 24)
+                    .accessibilityIdentifier("online-coming-soon")
+            }
+            .padding()
+        }
+    }
+}
+
+private struct MapSelectView: View {
+    let onSelectMap: (MapDefinition) -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 14) {
+                Text("Select Map")
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 4)
+
+                ForEach(MapDefinition.all) { map in
+                    SelectionCard(
+                        title: map.displayName,
+                        subtitle: map.summary,
+                        accent: Palette.home,
+                        dimmed: false,
+                        action: { onSelectMap(map) }
+                    )
+                    .accessibilityIdentifier("map-\(map.id.rawValue)")
+                }
+
+                Button("Back", action: onBack)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 8)
+            }
+            .padding()
+        }
+    }
+}
+
+// Reused card for mode and map choices. `dimmed` styles a not-yet-available option
+// while keeping it tappable (e.g. to show a Coming Soon sheet).
+private struct SelectionCard: View {
+    let title: String
+    let subtitle: String
+    let accent: Color
+    let dimmed: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .padding(18)
+            .frame(maxWidth: 360)
+            .background(accent.opacity(dimmed ? 0.12 : 0.28), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(accent.opacity(dimmed ? 0.3 : 0.7), lineWidth: 1.5))
+        }
+        .opacity(dimmed ? 0.65 : 1.0)
+    }
+}
+
 struct MatchView: View {
     @StateObject private var controller: MatchController
 
-    init(onFinished: @escaping (ScoreState) -> Void) {
-        _controller = StateObject(wrappedValue: MatchController(onFinished: onFinished))
+    init(map: MapDefinition, onFinished: @escaping (ScoreState) -> Void) {
+        _controller = StateObject(wrappedValue: MatchController(config: map.config, onFinished: onFinished))
     }
 
     var body: some View {

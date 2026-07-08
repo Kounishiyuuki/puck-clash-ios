@@ -44,7 +44,32 @@ final class PuckClashUITests: XCTestCase {
     }
 
     @MainActor
-    func testJoystickAppearsAfterStart() throws {
+    func testCPUPracticeFlowReachesMatch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        // Start -> Mode Select -> Map Select -> Match.
+        let startButton = app.buttons["start-match-button"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        startButton.tap()
+
+        let cpuCard = app.buttons["mode-cpu-practice"]
+        XCTAssertTrue(cpuCard.waitForExistence(timeout: 5))
+        cpuCard.tap()
+
+        let classicMap = app.buttons["map-classic"]
+        XCTAssertTrue(classicMap.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["map-wide"].exists)
+        XCTAssertTrue(app.buttons["map-speed"].exists)
+        classicMap.tap()
+
+        // The match screen shows the fixed virtual joystick.
+        let joystick = app.otherElements["joystick-control"]
+        XCTAssertTrue(joystick.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testOnlineMatchShowsComingSoon() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -52,9 +77,14 @@ final class PuckClashUITests: XCTestCase {
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
         startButton.tap()
 
-        // The match screen shows the fixed virtual joystick.
-        let joystick = app.otherElements["joystick-control"]
-        XCTAssertTrue(joystick.waitForExistence(timeout: 5))
+        let onlineCard = app.buttons["mode-online-match"]
+        XCTAssertTrue(onlineCard.waitForExistence(timeout: 5))
+        onlineCard.tap()
+
+        // The online entry only shows a placeholder; it must not enter a match.
+        let comingSoon = app.staticTexts["online-coming-soon"]
+        XCTAssertTrue(comingSoon.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["joystick-control"].exists)
     }
 
     @MainActor

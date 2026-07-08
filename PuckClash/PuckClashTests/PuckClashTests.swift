@@ -391,4 +391,39 @@ struct PuckClashTests {
         #expect(ScoreState(home: 2, away: 2).winner == nil)
         #expect(ScoreState.zero.winner == nil)
     }
+
+    // MARK: - Map definitions
+
+    @Test func mapDefinitionsCoverAllIDs() {
+        #expect(MapDefinition.all.count == 3)
+        #expect(MapDefinition.all.map(\.id) == [.classic, .wide, .speed])
+        #expect(Set(MapID.allCases) == Set(MapDefinition.all.map(\.id)))
+    }
+
+    @Test func mapDisplayNamesAreUnique() {
+        let names = MapDefinition.all.map(\.displayName)
+        #expect(Set(names).count == names.count)
+    }
+
+    @Test func classicMapMatchesStandardConfig() {
+        #expect(MapDefinition.classic.config == MatchConfig.standard)
+    }
+
+    @Test func wideMapIsWiderThanClassic() {
+        #expect(MapDefinition.wide.config.rinkSize.x > MapDefinition.classic.config.rinkSize.x)
+    }
+
+    @Test func speedMapIsFasterThanClassic() {
+        #expect(MapDefinition.speed.config.strikerMaxSpeed > MapDefinition.classic.config.strikerMaxSpeed)
+    }
+
+    @Test func mapsAreSymmetricAroundCenter() {
+        // The goal mouth is centered on every map, so neither side is favored.
+        for map in MapDefinition.all {
+            let config = map.config
+            let leftGap = config.rinkCenter.x - config.goalMouthMinX
+            let rightGap = config.goalMouthMaxX - config.rinkCenter.x
+            #expect(leftGap == rightGap)
+        }
+    }
 }
