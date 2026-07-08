@@ -276,24 +276,26 @@ final class RinkScene: SKScene {
     }
 
     private func rinkFrame(for config: MatchConfig) -> CGRect {
-        // Minimal side padding widens the rink; the top clears the HUD and the
-        // bottom reserves the joystick / skill control zone.
-        let horizontalPadding: CGFloat = 8
-        let topPadding: CGFloat = 100
-        let bottomPadding: CGFloat = 156
+        // Minimal side padding pushes the rink close to the screen edges; the top
+        // clears the HUD and the bottom reserves the joystick / skill control zone.
+        let horizontalPadding: CGFloat = 4
+        let topPadding: CGFloat = 92
+        let bottomPadding: CGFloat = 172
         let availableSize = CGSize(
             width: max(1, size.width - horizontalPadding * 2),
             height: max(1, size.height - topPadding - bottomPadding)
         )
         let rinkAspect = config.rinkSize.x / config.rinkSize.y
-        let availableAspect = availableSize.width / availableSize.height
 
-        let rinkSize: CGSize
-        if availableAspect > rinkAspect {
-            rinkSize = CGSize(width: availableSize.height * rinkAspect, height: availableSize.height)
-        } else {
-            rinkSize = CGSize(width: availableSize.width, height: availableSize.width / rinkAspect)
+        // Width-first: fill the available width, and only shrink if the resulting
+        // height would exceed the available height (then it is height-bound).
+        var rinkWidth = availableSize.width
+        var rinkHeight = rinkWidth / rinkAspect
+        if rinkHeight > availableSize.height {
+            rinkHeight = availableSize.height
+            rinkWidth = rinkHeight * rinkAspect
         }
+        let rinkSize = CGSize(width: rinkWidth, height: rinkHeight)
 
         return CGRect(
             x: (size.width - rinkSize.width) * 0.5,
