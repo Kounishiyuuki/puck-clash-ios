@@ -426,4 +426,93 @@ struct PuckClashTests {
             #expect(leftGap == rightGap)
         }
     }
+
+    // MARK: - LocalMatchSession
+
+    @Test func localSessionAdvanceMatchesEngineUpdate() {
+        // The session must be a transparent wrapper: same config, same home input and
+        // same deltaTime produce the exact same state transition as a bare GameEngine.
+        let move = Vector2(x: 0.6, y: -0.8)
+        let session = LocalMatchSession(config: config)
+        session.setHomeInput(moveVector: move)
+        var engine = GameEngine(state: .initial(config: config))
+
+        for _ in 0..<5 {
+            let sessionState = session.advance(deltaTime: 0.1)
+            engine.update(deltaTime: 0.1, inputs: [PlayerInput(playerId: .home, moveVector: move)])
+            #expect(sessionState == engine.state)
+        }
+    }
+
+    @Test func setHomeInputMovesHomeStriker() {
+        let session = LocalMatchSession(config: config)
+        let start = session.state.homePlayer.position
+
+        session.setHomeInput(moveVector: Vector2(x: 1, y: 0))
+        session.advance(deltaTime: 0.01)
+
+        // step = unit(+x) * strikerMaxSpeed(1000) * dt(0.01) = 10 to the right.
+        #expect(session.state.homePlayer.position == Vector2(x: start.x + 10, y: start.y))
+    }
+
+    @Test func zeroOrNilHomeInputKeepsHomeStrikerPut() {
+        let session = LocalMatchSession(config: config)
+        let start = session.state.homePlayer.position
+
+        session.setHomeInput(moveVector: .zero)
+        session.advance(deltaTime: 0.1)
+        #expect(session.state.homePlayer.position == start)
+
+        session.setHomeInput(moveVector: nil)
+        session.advance(deltaTime: 0.1)
+        #expect(session.state.homePlayer.position == start)
+    }
+
+    @Test func awayCPURunsThroughSessionWithoutHomeInput() {
+        // Strike the puck up into the away half for a few frames, then release home
+        // input entirely. The away CPU must still run (move) and must match a bare
+        // GameEngine step for step, proving it lives inside the session's engine.
+        let session = LocalMatchSession(config: config)
+        var engine = GameEngine(state: .initial(config: config))
+        let up = Vector2(x: 0, y: 1)
+
+        var awayMoved = false
+        for frame in 0..<40 {
+            let homeInput: [PlayerInput]
+            if frame < 3 {
+                session.setHomeInput(moveVector: up)
+                homeInput = [PlayerInput(playerId: .home, moveVector: up)]
+            } else {
+                session.setHomeInput(moveVector: nil)
+                homeInput = []
+            }
+
+            let sessionState = session.advance(deltaTime: 0.045)
+            engine.update(deltaTime: 0.045, inputs: homeInput)
+            #expect(sessionState == engine.state)
+
+            if sessionState.awayPlayer.position != config.awayStartPosition {
+                awayMoved = true
+            }
+        }
+
+        #expect(awayMoved)
+    }
+
+    @Test func localSessionFinishesAtTimeLimit() {
+        let session = LocalMatchSession(config: config)
+
+        // matchDuration is 10; a single large step drives the clock to zero.
+        session.advance(deltaTime: 12)
+
+        #expect(session.state.phase == .finished)
+        #expect(session.state.remainingTime == 0)
+    }
+
+    @Test func localSessionKeepsProvidedConfig() {
+        let session = LocalMatchSession(config: MapDefinition.wide.config)
+
+        #expect(session.config == MapDefinition.wide.config)
+        #expect(session.state.config == MapDefinition.wide.config)
+    }
 }

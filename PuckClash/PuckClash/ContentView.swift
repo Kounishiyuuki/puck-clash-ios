@@ -29,14 +29,17 @@ struct MatchHUD: Equatable {
     var remainingSeconds = 0
 }
 
-// Owns a single RinkScene shared by the SpriteView and the joystick, and republishes
-// the low-frequency HUD snapshot. It carries no game rules.
+// Owns the match: a LocalMatchSession (the simulation) and the RinkScene that renders
+// it, and republishes the low-frequency HUD snapshot. It carries no game rules.
 final class MatchController: ObservableObject {
+    let session: LocalMatchSession
     let scene: RinkScene
     @Published var hud = MatchHUD()
 
     init(config: MatchConfig, onFinished: @escaping (ScoreState) -> Void) {
-        let scene = RinkScene(config: config)
+        let session = LocalMatchSession(config: config)
+        self.session = session
+        let scene = RinkScene(session: session)
         self.scene = scene
         scene.onFinished = onFinished
         scene.onHUDChange = { [weak self] snapshot in
@@ -44,10 +47,10 @@ final class MatchController: ObservableObject {
         }
     }
 
-    // Joystick vector goes straight to the scene (not through @Published) so dragging
-    // does not re-render SwiftUI every frame.
+    // Joystick vector goes straight to the session (not through @Published) so dragging
+    // does not re-render SwiftUI every frame. The session treats zero as no input.
     func setMoveVector(_ vector: Vector2) {
-        scene.homeMoveVector = vector == .zero ? nil : vector
+        session.setHomeInput(moveVector: vector)
     }
 }
 
