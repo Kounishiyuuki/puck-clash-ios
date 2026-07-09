@@ -244,7 +244,7 @@ protocol MatchSession: AnyObject {
 // Runs the match entirely on-device by owning a GameEngine. Home input arrives as
 // a joystick move vector; the away CPU stays inside GameEngine.update. All rules,
 // physics, scoring and timing remain in GameEngine — this class only wires input
-// into it and advances the clock, so a future OnlineMatchSession can replace it.
+// into it and advances the clock, so a future session implementation can replace it.
 final class LocalMatchSession: MatchSession {
     let config: MatchConfig
     private var engine: GameEngine
