@@ -515,4 +515,89 @@ struct PuckClashTests {
         #expect(session.config == MapDefinition.wide.config)
         #expect(session.state.config == MapDefinition.wide.config)
     }
+
+    // MARK: - Determinism (regression net for future fixed-tick work)
+
+    // A fixed script of (deltaTime, home moveVector) steps that exercises home
+    // movement, striker/puck collision, puck travel and the away CPU chase. These
+    // tests never assert hand-written physics values — they assert that identical
+    // inputs produce identical GameStates, locking in that GameEngine.update is a
+    // pure function of (state, inputs, deltaTime). Total scripted time (~0.95s)
+    // stays under matchDuration so the match keeps running.
+    private var determinismScript: [(dt: Double, home: Vector2?)] {
+        [
+            (0.10, Vector2(x: 0, y: 1)),
+            (0.10, Vector2(x: 0, y: 1)),
+            (0.05, Vector2(x: 1, y: 0.2)),
+            (0.05, Vector2(x: -0.5, y: 0.8)),
+            (0.10, nil),
+            (0.10, Vector2(x: 0.3, y: -0.4)),
+            (0.20, Vector2(x: -1, y: 0)),
+            (0.05, nil),
+            (0.10, Vector2(x: 0, y: 1)),
+            (0.10, Vector2(x: 0.6, y: 0.6)),
+        ]
+    }
+
+    private func homeInputs(_ moveVector: Vector2?) -> [PlayerInput] {
+        guard let moveVector else {
+            return []
+        }
+        return [PlayerInput(playerId: .home, moveVector: moveVector, timestamp: 1)]
+    }
+
+    @Test func repeatedSimulationYieldsIdenticalFinalState() {
+        func runToEnd() -> GameState {
+            var engine = GameEngine(state: .initial(config: config))
+            for step in determinismScript {
+                engine.update(deltaTime: step.dt, inputs: homeInputs(step.home))
+            }
+            return engine.state
+        }
+
+        // Same initial state + same script, run twice, must land on the same state.
+        #expect(runToEnd() == runToEnd())
+    }
+
+    @Test func independentEnginesAgreeAtEveryStep() {
+        var engineA = GameEngine(state: .initial(config: config))
+        var engineB = GameEngine(state: .initial(config: config))
+
+        for step in determinismScript {
+            let inputs = homeInputs(step.home)
+            engineA.update(deltaTime: step.dt, inputs: inputs)
+            engineB.update(deltaTime: step.dt, inputs: inputs)
+            #expect(engineA.state == engineB.state)
+        }
+    }
+
+    @Test func cpuOnlySimulationIsDeterministic() {
+        // Start the puck inside the away half sliding sideways, so that with no home
+        // input the puck travels and the away CPU actively chases it; the whole
+        // trajectory (away / puck / score / timer) must be reproducible run to run.
+        var initial = GameState.initial(config: frictionConfig)
+        initial.puck.position = Vector2(x: 30, y: 150)
+        initial.puck.velocity = Vector2(x: 60, y: 0)
+        let deltas: [Double] = [0.05, 0.05, 0.10, 0.10, 0.05, 0.10, 0.20, 0.05, 0.10, 0.10]
+
+        func run() -> [GameState] {
+            var engine = GameEngine(state: initial)
+            var states: [GameState] = []
+            for dt in deltas {
+                engine.update(deltaTime: dt, inputs: [])
+                states.append(engine.state)
+            }
+            return states
+        }
+
+        let first = run()
+        let second = run()
+        #expect(first == second)
+
+        // Guard against a vacuous pass: confirm the away CPU was actually exercised
+        // (it moved off its start at some frame), so this is a live simulation and
+        // not a trivially-constant state. The puck may drift back by the last frame,
+        // so check the whole trajectory rather than only the final state.
+        #expect(first.contains { $0.awayPlayer.position != initial.awayPlayer.position })
+    }
 }
