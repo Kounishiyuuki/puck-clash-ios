@@ -1,12 +1,13 @@
 import SpriteKit
 
 final class RinkScene: SKScene {
-    private var engine: GameEngine
-    // Handlers and stick input are set by the SwiftUI layer after creation; the
-    // scene stays free of SwiftUI and holds no game rules.
+    // The scene drives a MatchSession (local or, later, online) rather than owning a
+    // GameEngine. Home input is set on the session by the SwiftUI layer, not here.
+    private let session: MatchSession
+    // Handlers are set by the SwiftUI layer after creation; the scene stays free of
+    // SwiftUI and holds no game rules.
     var onFinished: ((ScoreState) -> Void)?
     var onHUDChange: ((MatchHUD) -> Void)?
-    var homeMoveVector: Vector2?
     private var hasNotifiedFinish = false
     private var lastHUD: MatchHUD?
     private var lastScore: ScoreState?
@@ -33,15 +34,16 @@ final class RinkScene: SKScene {
     private let awayColor = SKColor(red: 0.95, green: 0.28, blue: 0.34, alpha: 1)
     private let lineColor = SKColor(red: 0.55, green: 0.78, blue: 0.95, alpha: 1)
 
-    // SpriteKit owns no match rules; it drives GameCore, reports the final score
+    // SpriteKit owns no match rules; it drives a MatchSession, reports the final score
     // (onFinished) and, at most once per changed value, the HUD snapshot (onHUDChange).
-    init(config: MatchConfig = .standard) {
-        self.engine = GameEngine(state: .initial(config: config))
-        super.init(size: CGSize(width: config.rinkSize.x, height: config.rinkSize.y))
+    init(session: MatchSession) {
+        self.session = session
+        let rinkSize = session.config.rinkSize
+        super.init(size: CGSize(width: rinkSize.x, height: rinkSize.y))
     }
 
     required init?(coder aDecoder: NSCoder) {
-        self.engine = GameEngine()
+        self.session = LocalMatchSession(config: .standard)
         super.init(coder: aDecoder)
     }
 
@@ -49,34 +51,36 @@ final class RinkScene: SKScene {
         backgroundColor = SKColor(red: 0.03, green: 0.05, blue: 0.09, alpha: 1)
         scaleMode = .resizeFill
         buildScene()
-        render(engine.state)
-        publishHUD(engine.state, force: true)
+        render(session.state)
+        publishHUD(session.state, force: true)
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
-        render(engine.state)
+        render(session.state)
     }
 
     override func update(_ currentTime: TimeInterval) {
         let deltaTime = lastUpdateTime.map { currentTime - $0 } ?? 0
         lastUpdateTime = currentTime
 
-        engine.update(deltaTime: min(deltaTime, 1.0 / 30.0), inputs: playerInputs(at: currentTime))
-        render(engine.state)
-        applyFeedback(engine.state)
-        publishHUD(engine.state, force: false)
-        notifyIfFinished()
+        // Clamp the frame delta so a hitch cannot tunnel the puck; the session runs
+        // the simulation and hands back the resulting state to render.
+        let state = session.advance(deltaTime: min(deltaTime, 1.0 / 30.0))
+        render(state)
+        applyFeedback(state)
+        publishHUD(state, force: false)
+        notifyIfFinished(state)
     }
 
     // SKScene.update runs on the main thread, so invoking the SwiftUI-provided
     // closures here is safe. Fire onFinished once on the transition to finished.
-    private func notifyIfFinished() {
-        guard !hasNotifiedFinish, engine.state.phase == .finished else {
+    private func notifyIfFinished(_ state: GameState) {
+        guard !hasNotifiedFinish, state.phase == .finished else {
             return
         }
 
         hasNotifiedFinish = true
-        onFinished?(engine.state.score)
+        onFinished?(state.score)
     }
 
     // Only push a HUD snapshot when a displayed value actually changed, so SwiftUI
@@ -125,16 +129,6 @@ final class RinkScene: SKScene {
             .sequence([.fadeAlpha(to: 1.0, duration: 0.06), .fadeAlpha(to: base, duration: 0.22)]),
             withKey: "flash"
         )
-    }
-
-    // Home input comes from the SwiftUI joystick as a velocity-style vector; GameCore
-    // confines the striker to the lower half. Direct rink dragging is not used.
-    private func playerInputs(at timestamp: TimeInterval) -> [PlayerInput] {
-        guard let homeMoveVector, homeMoveVector != .zero else {
-            return []
-        }
-
-        return [PlayerInput(playerId: .home, moveVector: homeMoveVector, timestamp: timestamp)]
     }
 
     private func buildScene() {

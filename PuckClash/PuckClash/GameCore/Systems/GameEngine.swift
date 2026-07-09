@@ -229,3 +229,56 @@ struct GameEngine {
         )
     }
 }
+
+// Boundary between the presentation layer and how a match is actually run. A
+// session hides whether the simulation is local (GameEngine) or, later, driven by
+// a server. The presentation layer only feeds home input and advances time, then
+// renders the returned GameState. Foundation-only, like the rest of GameCore.
+protocol MatchSession: AnyObject {
+    var config: MatchConfig { get }
+    var state: GameState { get }
+    func setHomeInput(moveVector: Vector2?)
+    @discardableResult func advance(deltaTime: TimeInterval) -> GameState
+}
+
+// Runs the match entirely on-device by owning a GameEngine. Home input arrives as
+// a joystick move vector; the away CPU stays inside GameEngine.update. All rules,
+// physics, scoring and timing remain in GameEngine — this class only wires input
+// into it and advances the clock, so a future OnlineMatchSession can replace it.
+final class LocalMatchSession: MatchSession {
+    let config: MatchConfig
+    private var engine: GameEngine
+    // Latest joystick vector; nil (or zero, normalized to nil) means no home input.
+    private var homeMoveVector: Vector2?
+
+    init(config: MatchConfig) {
+        self.config = config
+        self.engine = GameEngine(state: .initial(config: config))
+    }
+
+    var state: GameState {
+        engine.state
+    }
+
+    // A zero vector is treated as "no input" so a released joystick does not force
+    // the striker through the half clamp every frame (matches the previous scene).
+    func setHomeInput(moveVector: Vector2?) {
+        if let moveVector, moveVector != .zero {
+            homeMoveVector = moveVector
+        } else {
+            homeMoveVector = nil
+        }
+    }
+
+    @discardableResult
+    func advance(deltaTime: TimeInterval) -> GameState {
+        let inputs: [PlayerInput]
+        if let homeMoveVector {
+            inputs = [PlayerInput(playerId: .home, moveVector: homeMoveVector)]
+        } else {
+            inputs = []
+        }
+        engine.update(deltaTime: deltaTime, inputs: inputs)
+        return engine.state
+    }
+}
