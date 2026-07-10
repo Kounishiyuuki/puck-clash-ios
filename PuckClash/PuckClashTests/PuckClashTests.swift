@@ -439,9 +439,9 @@ struct PuckClashTests {
         var engine = GameEngine(state: .initial(config: config))
 
         for _ in 0..<5 {
-            let sessionState = session.advance(deltaTime: fixedDelta)
+            let snapshot = session.advance(deltaTime: fixedDelta)
             engine.update(deltaTime: fixedDelta, inputs: [PlayerInput(playerId: .home, moveVector: move)])
-            #expect(sessionState == engine.state)
+            #expect(snapshot.state == engine.state)
         }
     }
 
@@ -492,11 +492,11 @@ struct PuckClashTests {
                 homeInput = []
             }
 
-            let sessionState = session.advance(deltaTime: fixedDelta)
+            let snapshot = session.advance(deltaTime: fixedDelta)
             engine.update(deltaTime: fixedDelta, inputs: homeInput)
-            #expect(sessionState == engine.state)
+            #expect(snapshot.state == engine.state)
 
-            if sessionState.awayPlayer.position != config.awayStartPosition {
+            if snapshot.state.awayPlayer.position != config.awayStartPosition {
                 awayMoved = true
             }
         }
@@ -597,6 +597,87 @@ struct PuckClashTests {
         let afterCap = session.state
         session.advance(deltaTime: 0)
         #expect(session.state == afterCap)
+    }
+
+    // MARK: - MatchSnapshot
+
+    @Test func matchSnapshotHoldsFieldsAndIsEquatable() {
+        let state = GameState.initial(config: config)
+        let snapshot = MatchSnapshot(tick: 7, state: state, isAuthoritative: true)
+
+        #expect(snapshot.tick == 7)
+        #expect(snapshot.state == state)
+        #expect(snapshot.isAuthoritative)
+
+        #expect(snapshot == MatchSnapshot(tick: 7, state: state, isAuthoritative: true))
+        #expect(snapshot != MatchSnapshot(tick: 8, state: state, isAuthoritative: true))
+        #expect(snapshot != MatchSnapshot(tick: 7, state: state, isAuthoritative: false))
+    }
+
+    @Test func localSessionInitialSnapshotHasZeroTickAndIsAuthoritative() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        // A sub-step advance runs no engine step: tick stays 0, state is the initial one.
+        let snapshot = session.advance(deltaTime: fixedDelta * 0.5)
+
+        #expect(snapshot.tick == 0)
+        #expect(snapshot.isAuthoritative)
+        #expect(snapshot.state == session.state)
+    }
+
+    @Test func localSessionSnapshotTickAdvancesByOneStep() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        let snapshot = session.advance(deltaTime: fixedDelta)
+
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: fixedDelta, inputs: [])
+        #expect(snapshot.tick == 1)
+        #expect(snapshot.state == engine.state)
+        #expect(snapshot.isAuthoritative)
+    }
+
+    @Test func localSessionSnapshotTickAdvancesByStepCount() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        // 3.5 steps of time runs exactly 3 whole steps (avoids the exact-boundary case).
+        let snapshot = session.advance(deltaTime: fixedDelta * 3.5)
+
+        var engine = GameEngine(state: .initial(config: config))
+        for _ in 0..<3 {
+            engine.update(deltaTime: fixedDelta, inputs: [])
+        }
+        #expect(snapshot.tick == 3)
+        #expect(snapshot.state == engine.state)
+    }
+
+    @Test func localSessionSnapshotTickCarriesOverAcrossSubStepAdvances() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        let first = session.advance(deltaTime: fixedDelta * 0.5)
+        #expect(first.tick == 0)
+
+        // The carried-over half plus another half completes exactly one step: tick -> 1.
+        let second = session.advance(deltaTime: fixedDelta * 0.5)
+        #expect(second.tick == 1)
+    }
+
+    @Test func localSessionSnapshotTickIsBoundedByCatchUpCap() {
+        let session = LocalMatchSession(config: config)
+
+        // A huge delta runs at most maxCatchUpSteps (5): tick advances by exactly 5.
+        let capped = session.advance(deltaTime: 100)
+        #expect(capped.tick == 5)
+
+        // Backlog beyond the cap is dropped, so a following zero delta runs no step
+        // and the tick does not move.
+        let after = session.advance(deltaTime: 0)
+        #expect(after.tick == 5)
+        #expect(after.state == capped.state)
     }
 
     // MARK: - Determinism (regression net for future fixed-tick work)

@@ -65,8 +65,9 @@ final class RinkScene: SKScene {
 
         // Pass the raw frame delta: the session owns time management now, running the
         // simulation in fixed steps and capping catch-up so a hitch cannot tunnel the
-        // puck or trigger a runaway burst of steps.
-        let state = session.advance(deltaTime: deltaTime)
+        // puck or trigger a runaway burst of steps. Only the snapshot's state is
+        // rendered; the tick is not needed by the scene.
+        let state = session.advance(deltaTime: deltaTime).state
         render(state)
         applyFeedback(state)
         publishHUD(state, force: false)

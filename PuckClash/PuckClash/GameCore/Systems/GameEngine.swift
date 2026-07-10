@@ -233,12 +233,12 @@ struct GameEngine {
 // Boundary between the presentation layer and how a match is actually run. A
 // session hides whether the simulation is local (GameEngine) or, later, driven by
 // a server. The presentation layer only feeds home input and advances time, then
-// renders the returned GameState. Foundation-only, like the rest of GameCore.
+// renders the returned snapshot's state. Foundation-only, like the rest of GameCore.
 protocol MatchSession: AnyObject {
     var config: MatchConfig { get }
     var state: GameState { get }
     func setHomeInput(moveVector: Vector2?)
-    @discardableResult func advance(deltaTime: TimeInterval) -> GameState
+    @discardableResult func advance(deltaTime: TimeInterval) -> MatchSnapshot
 }
 
 // Runs the match entirely on-device by owning a GameEngine. Home input arrives as
@@ -257,6 +257,8 @@ final class LocalMatchSession: MatchSession {
     private var homeMoveVector: Vector2?
     // Real time received but not yet simulated, drained in whole fixedDelta steps.
     private var accumulatedTime: TimeInterval = 0
+    // Fixed-step counter: +1 for each engine.update(fixedDelta). Reported in snapshots.
+    private var tick = 0
 
     init(config: MatchConfig) {
         self.config = config
@@ -281,8 +283,9 @@ final class LocalMatchSession: MatchSession {
     // simulation advances at a frame-rate-independent rate. The same home input is
     // applied to every step of one advance; the away CPU stays inside GameEngine.
     // A delta shorter than one step runs zero steps and carries over to next time.
+    // Each step advances `tick`; the snapshot is always authoritative for local play.
     @discardableResult
-    func advance(deltaTime: TimeInterval) -> GameState {
+    func advance(deltaTime: TimeInterval) -> MatchSnapshot {
         let fixedDelta = 1.0 / config.tickRate
         accumulatedTime += max(0, deltaTime)
 
@@ -297,6 +300,7 @@ final class LocalMatchSession: MatchSession {
         while accumulatedTime >= fixedDelta, steps < Self.maxCatchUpSteps {
             engine.update(deltaTime: fixedDelta, inputs: inputs)
             accumulatedTime -= fixedDelta
+            tick += 1
             steps += 1
         }
 
@@ -305,6 +309,6 @@ final class LocalMatchSession: MatchSession {
             accumulatedTime = 0
         }
 
-        return engine.state
+        return MatchSnapshot(tick: tick, state: engine.state, isAuthoritative: true)
     }
 }
