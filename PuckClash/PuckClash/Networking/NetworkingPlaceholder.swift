@@ -10,7 +10,7 @@ enum NetworkingPlaceholder {
 // OnlineMatchSession is driven entirely through this protocol, and tests use a mock.
 protocol MatchTransport: AnyObject {
     // Client -> server: the local player's latest stick input, tagged with the tick
-    // of the last snapshot it was based on (for future reconciliation).
+    // of the last snapshot it was based on for future non-local session handling.
     func sendHomeInput(moveVector: Vector2?, tick: Int)
     // Server -> client: an authoritative snapshot to render. A real transport must
     // deliver this on the main thread, since RinkScene.update consumes it there.
@@ -22,8 +22,8 @@ protocol MatchTransport: AnyObject {
 // Server-authoritative online session (skeleton). Unlike LocalMatchSession it owns no
 // GameEngine and runs no local physics: the server is the sole authority, so the
 // session simply hands back the latest snapshot the transport delivered and forwards
-// local input to the server. There is no prediction/reconciliation yet, and it is not
-// wired into the UI — Online Match remains a Coming Soon placeholder.
+// local input to the server. It is not wired into the UI — Online Match remains a
+// Coming Soon placeholder.
 final class OnlineMatchSession: MatchSession {
     let config: MatchConfig
     private let transport: MatchTransport
