@@ -764,4 +764,94 @@ struct PuckClashTests {
         // so check the whole trajectory rather than only the final state.
         #expect(first.contains { $0.awayPlayer.position != initial.awayPlayer.position })
     }
+
+    // MARK: - OnlineMatchSession (skeleton, no real networking)
+
+    // In-memory stand-in for a real transport: records what was sent and lets a test
+    // push server snapshots into the session via `emit`.
+    private final class MockTransport: MatchTransport {
+        private(set) var sendCount = 0
+        private(set) var lastSentMoveVector: Vector2?
+        private(set) var lastSentTick: Int?
+        var onSnapshot: ((MatchSnapshot) -> Void)?
+        var onDisconnect: (() -> Void)?
+
+        func sendHomeInput(moveVector: Vector2?, tick: Int) {
+            sendCount += 1
+            lastSentMoveVector = moveVector
+            lastSentTick = tick
+        }
+
+        // Simulate the server pushing an authoritative snapshot to the client.
+        func emit(_ snapshot: MatchSnapshot) {
+            onSnapshot?(snapshot)
+        }
+    }
+
+    @Test func onlineSessionFallsBackToInitialSnapshotBeforeReceivingServerSnapshot() {
+        let transport = MockTransport()
+        let session = OnlineMatchSession(config: config, transport: transport)
+
+        let snapshot = session.advance(deltaTime: 0.1)
+        #expect(snapshot.tick == 0)
+        #expect(snapshot.state == GameState.initial(config: config))
+        #expect(snapshot.isAuthoritative)
+    }
+
+    @Test func onlineSessionReturnsInjectedSnapshot() {
+        let transport = MockTransport()
+        let session = OnlineMatchSession(config: config, transport: transport)
+
+        var injected = GameState.initial(config: config)
+        injected.score.home = 2
+        injected.puck.position = Vector2(x: 10, y: 20)
+        let serverSnapshot = MatchSnapshot(tick: 42, state: injected, isAuthoritative: true)
+        transport.emit(serverSnapshot)
+
+        #expect(session.advance(deltaTime: 0.016) == serverSnapshot)
+        #expect(session.state == injected)
+    }
+
+    @Test func onlineSessionForwardsHomeInputToTransport() {
+        let transport = MockTransport()
+        let session = OnlineMatchSession(config: config, transport: transport)
+
+        // Establish a server tick so the forwarded input carries it.
+        transport.emit(MatchSnapshot(tick: 9, state: .initial(config: config), isAuthoritative: true))
+
+        let move = Vector2(x: 0.6, y: -0.8)
+        session.setHomeInput(moveVector: move)
+        #expect(transport.sendCount == 1)
+        #expect(transport.lastSentMoveVector == move)
+        #expect(transport.lastSentTick == 9)
+
+        // A released / zero stick is normalized to "no input", like LocalMatchSession.
+        session.setHomeInput(moveVector: .zero)
+        #expect(transport.lastSentMoveVector == nil)
+    }
+
+    @Test func onlineSessionKeepsProvidedConfig() {
+        let transport = MockTransport()
+        let session = OnlineMatchSession(config: MapDefinition.wide.config, transport: transport)
+
+        #expect(session.config == MapDefinition.wide.config)
+        #expect(session.state.config == MapDefinition.wide.config)
+    }
+
+    @Test func onlineSessionDoesNotAdvanceLocalPhysics() {
+        let transport = MockTransport()
+        let session = OnlineMatchSession(config: config, transport: transport)
+
+        // No server snapshot yet: repeated advances never move the state or tick.
+        let a = session.advance(deltaTime: 0.1)
+        let b = session.advance(deltaTime: 5)
+        #expect(a == b)
+        #expect(b.tick == 0)
+
+        // After one snapshot, further advances keep returning it — no local stepping.
+        let server = MatchSnapshot(tick: 3, state: .initial(config: config), isAuthoritative: true)
+        transport.emit(server)
+        #expect(session.advance(deltaTime: 0.1) == server)
+        #expect(session.advance(deltaTime: 0.1) == server)
+    }
 }
