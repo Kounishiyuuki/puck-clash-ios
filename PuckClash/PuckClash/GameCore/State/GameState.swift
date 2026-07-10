@@ -231,8 +231,8 @@ struct GameState: Equatable {
 
 // One simulation frame handed from a MatchSession to the presentation layer. `state`
 // is what gets rendered; `tick` is how many fixed steps the simulation has advanced
-// (see LocalMatchSession); `isAuthoritative` marks whether this state is confirmed
-// truth — always true for local play, later false for client-predicted online frames.
+// (see LocalMatchSession); `isAuthoritative` marks whether this is confirmed
+// truth for the current session.
 // No transport/timing fields live here, so GameCore stays Foundation-only.
 struct MatchSnapshot: Equatable {
     let tick: Int
