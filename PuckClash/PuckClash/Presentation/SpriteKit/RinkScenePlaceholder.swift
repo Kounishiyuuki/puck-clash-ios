@@ -63,9 +63,10 @@ final class RinkScene: SKScene {
         let deltaTime = lastUpdateTime.map { currentTime - $0 } ?? 0
         lastUpdateTime = currentTime
 
-        // Clamp the frame delta so a hitch cannot tunnel the puck; the session runs
-        // the simulation and hands back the resulting state to render.
-        let state = session.advance(deltaTime: min(deltaTime, 1.0 / 30.0))
+        // Pass the raw frame delta: the session owns time management now, running the
+        // simulation in fixed steps and capping catch-up so a hitch cannot tunnel the
+        // puck or trigger a runaway burst of steps.
+        let state = session.advance(deltaTime: deltaTime)
         render(state)
         applyFeedback(state)
         publishHUD(state, force: false)
