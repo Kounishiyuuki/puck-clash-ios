@@ -430,29 +430,33 @@ struct PuckClashTests {
     // MARK: - LocalMatchSession
 
     @Test func localSessionAdvanceMatchesEngineUpdate() {
-        // The session must be a transparent wrapper: same config, same home input and
-        // same deltaTime produce the exact same state transition as a bare GameEngine.
+        // The session drains time in fixed steps: an advance of exactly one fixedDelta
+        // runs exactly one GameEngine step, matching a bare engine stepped the same way.
         let move = Vector2(x: 0.6, y: -0.8)
+        let fixedDelta = 1.0 / config.tickRate
         let session = LocalMatchSession(config: config)
         session.setHomeInput(moveVector: move)
         var engine = GameEngine(state: .initial(config: config))
 
         for _ in 0..<5 {
-            let sessionState = session.advance(deltaTime: 0.1)
-            engine.update(deltaTime: 0.1, inputs: [PlayerInput(playerId: .home, moveVector: move)])
+            let sessionState = session.advance(deltaTime: fixedDelta)
+            engine.update(deltaTime: fixedDelta, inputs: [PlayerInput(playerId: .home, moveVector: move)])
             #expect(sessionState == engine.state)
         }
     }
 
     @Test func setHomeInputMovesHomeStriker() {
         let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
         let start = session.state.homePlayer.position
 
         session.setHomeInput(moveVector: Vector2(x: 1, y: 0))
-        session.advance(deltaTime: 0.01)
+        session.advance(deltaTime: fixedDelta)
 
-        // step = unit(+x) * strikerMaxSpeed(1000) * dt(0.01) = 10 to the right.
-        #expect(session.state.homePlayer.position == Vector2(x: start.x + 10, y: start.y))
+        // One fixed step moves home to the right (by strikerMaxSpeed * fixedDelta),
+        // with the y coordinate unchanged. Exact distance is left to the engine tests.
+        #expect(session.state.homePlayer.position.x > start.x)
+        #expect(session.state.homePlayer.position.y == start.y)
     }
 
     @Test func zeroOrNilHomeInputKeepsHomeStrikerPut() {
@@ -472,14 +476,15 @@ struct PuckClashTests {
         // Strike the puck up into the away half for a few frames, then release home
         // input entirely. The away CPU must still run (move) and must match a bare
         // GameEngine step for step, proving it lives inside the session's engine.
+        let fixedDelta = 1.0 / config.tickRate
         let session = LocalMatchSession(config: config)
         var engine = GameEngine(state: .initial(config: config))
         let up = Vector2(x: 0, y: 1)
 
         var awayMoved = false
-        for frame in 0..<40 {
+        for frame in 0..<60 {
             let homeInput: [PlayerInput]
-            if frame < 3 {
+            if frame < 6 {
                 session.setHomeInput(moveVector: up)
                 homeInput = [PlayerInput(playerId: .home, moveVector: up)]
             } else {
@@ -487,8 +492,8 @@ struct PuckClashTests {
                 homeInput = []
             }
 
-            let sessionState = session.advance(deltaTime: 0.045)
-            engine.update(deltaTime: 0.045, inputs: homeInput)
+            let sessionState = session.advance(deltaTime: fixedDelta)
+            engine.update(deltaTime: fixedDelta, inputs: homeInput)
             #expect(sessionState == engine.state)
 
             if sessionState.awayPlayer.position != config.awayStartPosition {
@@ -501,9 +506,15 @@ struct PuckClashTests {
 
     @Test func localSessionFinishesAtTimeLimit() {
         let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
 
-        // matchDuration is 10; a single large step drives the clock to zero.
-        session.advance(deltaTime: 12)
+        // matchDuration is 10; one big delta only runs maxCatchUpSteps, so step the
+        // session forward until the clock runs out (with a safety bound on the loop).
+        var guardCount = 0
+        while session.state.phase != .finished, guardCount < 10_000 {
+            session.advance(deltaTime: fixedDelta)
+            guardCount += 1
+        }
 
         #expect(session.state.phase == .finished)
         #expect(session.state.remainingTime == 0)
@@ -514,6 +525,78 @@ struct PuckClashTests {
 
         #expect(session.config == MapDefinition.wide.config)
         #expect(session.state.config == MapDefinition.wide.config)
+    }
+
+    // MARK: - Fixed-step accumulator
+
+    @Test func standardConfigUsesSixtyHzTickRate() {
+        #expect(MatchConfig.standard.tickRate == 60)
+        // Every selectable map must carry a usable (positive) tick rate.
+        for map in MapDefinition.all {
+            #expect(map.config.tickRate > 0)
+        }
+    }
+
+    @Test func advanceShorterThanOneStepRunsNoStepButCarriesOver() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+        let start = session.state
+
+        // Half a step: nothing simulates yet, and the state is untouched.
+        session.advance(deltaTime: fixedDelta * 0.5)
+        #expect(session.state == start)
+
+        // A second half step completes exactly one step's worth of carried-over time,
+        // so precisely one engine step runs.
+        session.advance(deltaTime: fixedDelta * 0.5)
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: fixedDelta, inputs: [])
+        #expect(session.state == engine.state)
+    }
+
+    @Test func advanceOfOneStepRunsExactlyOneEngineStep() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        session.advance(deltaTime: fixedDelta)
+
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: fixedDelta, inputs: [])
+        #expect(session.state == engine.state)
+    }
+
+    @Test func advanceOfSeveralStepsRunsThatManyEngineSteps() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        // 3.5 steps of time drains exactly 3 whole steps (0.5 carried over). Using a
+        // non-integer multiple avoids a floating-point boundary at exactly 3 steps.
+        session.advance(deltaTime: fixedDelta * 3.5)
+
+        var engine = GameEngine(state: .initial(config: config))
+        for _ in 0..<3 {
+            engine.update(deltaTime: fixedDelta, inputs: [])
+        }
+        #expect(session.state == engine.state)
+    }
+
+    @Test func catchUpIsBoundedAndBacklogDropped() {
+        let fixedDelta = 1.0 / config.tickRate
+        let session = LocalMatchSession(config: config)
+
+        // A huge delta must run at most maxCatchUpSteps (5), not hundreds of steps.
+        session.advance(deltaTime: 100)
+
+        var engine = GameEngine(state: .initial(config: config))
+        for _ in 0..<5 {
+            engine.update(deltaTime: fixedDelta, inputs: [])
+        }
+        #expect(session.state == engine.state)
+
+        // Backlog beyond the cap is dropped, so a following zero delta runs no steps.
+        let afterCap = session.state
+        session.advance(deltaTime: 0)
+        #expect(session.state == afterCap)
     }
 
     // MARK: - Determinism (regression net for future fixed-tick work)

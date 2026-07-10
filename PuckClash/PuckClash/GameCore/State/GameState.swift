@@ -61,6 +61,10 @@ struct MatchConfig: Equatable {
     let wallRestitution: Double
     let puckDamping: Double
     let puckStopSpeed: Double
+    // Simulation step rate (Hz). The engine still updates one variable step at a
+    // time; sessions convert real frame time into fixed steps of 1/tickRate so the
+    // simulation is frame-rate independent, in preparation for online play.
+    let tickRate: Double
 
     init(
         rinkSize: Vector2,
@@ -72,7 +76,8 @@ struct MatchConfig: Equatable {
         strikerHitRestitution: Double = 1.0,
         wallRestitution: Double = 1.0,
         puckDamping: Double = 1.0,
-        puckStopSpeed: Double = 0
+        puckStopSpeed: Double = 0,
+        tickRate: Double = 60
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -84,6 +89,7 @@ struct MatchConfig: Equatable {
         self.wallRestitution = wallRestitution
         self.puckDamping = puckDamping
         self.puckStopSpeed = puckStopSpeed
+        self.tickRate = tickRate
     }
 
     var rinkCenter: Vector2 {

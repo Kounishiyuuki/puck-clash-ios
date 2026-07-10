@@ -246,10 +246,17 @@ protocol MatchSession: AnyObject {
 // physics, scoring and timing remain in GameEngine — this class only wires input
 // into it and advances the clock, so a future session implementation can replace it.
 final class LocalMatchSession: MatchSession {
+    // Cap on fixed steps run per advance. A long hitch (or a backgrounded app) must
+    // not trigger a huge burst of catch-up steps that stalls the frame — beyond this
+    // cap the leftover backlog is dropped ("spiral of death" guard).
+    private static let maxCatchUpSteps = 5
+
     let config: MatchConfig
     private var engine: GameEngine
     // Latest joystick vector; nil (or zero, normalized to nil) means no home input.
     private var homeMoveVector: Vector2?
+    // Real time received but not yet simulated, drained in whole fixedDelta steps.
+    private var accumulatedTime: TimeInterval = 0
 
     init(config: MatchConfig) {
         self.config = config
@@ -270,15 +277,34 @@ final class LocalMatchSession: MatchSession {
         }
     }
 
+    // Accumulate the real frame delta and drain it in fixed 1/tickRate steps, so the
+    // simulation advances at a frame-rate-independent rate. The same home input is
+    // applied to every step of one advance; the away CPU stays inside GameEngine.
+    // A delta shorter than one step runs zero steps and carries over to next time.
     @discardableResult
     func advance(deltaTime: TimeInterval) -> GameState {
+        let fixedDelta = 1.0 / config.tickRate
+        accumulatedTime += max(0, deltaTime)
+
         let inputs: [PlayerInput]
         if let homeMoveVector {
             inputs = [PlayerInput(playerId: .home, moveVector: homeMoveVector)]
         } else {
             inputs = []
         }
-        engine.update(deltaTime: deltaTime, inputs: inputs)
+
+        var steps = 0
+        while accumulatedTime >= fixedDelta, steps < Self.maxCatchUpSteps {
+            engine.update(deltaTime: fixedDelta, inputs: inputs)
+            accumulatedTime -= fixedDelta
+            steps += 1
+        }
+
+        // Hit the cap: drop the remaining backlog instead of letting it grow forever.
+        if steps == Self.maxCatchUpSteps {
+            accumulatedTime = 0
+        }
+
         return engine.state
     }
 }
