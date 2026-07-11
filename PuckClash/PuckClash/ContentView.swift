@@ -136,14 +136,14 @@ private struct ModeSelectView: View {
             ArenaBackground()
 
             VStack(spacing: 18) {
-                Text("Select Mode")
+                Text("モード選択")
                     .font(.system(size: 32, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.bottom, 4)
 
                 SelectionCard(
-                    title: "CPU Practice",
-                    subtitle: "Play offline against the CPU",
+                    title: "CPU練習",
+                    subtitle: "オフラインでCPUと対戦",
                     accent: Palette.home,
                     dimmed: false,
                     action: onSelectCPU
@@ -151,15 +151,15 @@ private struct ModeSelectView: View {
                 .accessibilityIdentifier("mode-cpu-practice")
 
                 SelectionCard(
-                    title: "Online Match",
-                    subtitle: "Coming soon",
+                    title: "オンライン対戦",
+                    subtitle: "準備中",
                     accent: Palette.away,
                     dimmed: true,
                     action: { showComingSoon = true }
                 )
                 .accessibilityIdentifier("mode-online-match")
 
-                Button("Back", action: onBack)
+                Button("戻る", action: onBack)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.75))
                     .padding(.top, 8)
@@ -181,10 +181,10 @@ private struct ComingSoonView: View {
                 Image(systemName: "wifi")
                     .font(.system(size: 40))
                     .foregroundStyle(Palette.accent)
-                Text("Online Match")
+                Text("オンライン対戦")
                     .font(.title.weight(.heavy))
                     .foregroundStyle(.white)
-                Text("Coming soon — online multiplayer is still in development. For now, enjoy CPU Practice.")
+                Text("準備中 — オンライン対戦は現在開発中です。今はCPU練習をお楽しみください。")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white.opacity(0.75))
@@ -205,7 +205,7 @@ private struct MapSelectView: View {
             ArenaBackground()
 
             VStack(spacing: 14) {
-                Text("Select Map")
+                Text("マップ選択")
                     .font(.system(size: 32, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.bottom, 4)
@@ -221,7 +221,7 @@ private struct MapSelectView: View {
                     .accessibilityIdentifier("map-\(map.id.rawValue)")
                 }
 
-                Button("Back", action: onBack)
+                Button("戻る", action: onBack)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.75))
                     .padding(.top, 8)
@@ -290,12 +290,12 @@ private struct MatchHUDBar: View {
 
     var body: some View {
         HStack(alignment: .center) {
-            scoreColumn(title: "YOU", score: hud.homeScore, color: Palette.home)
+            scoreColumn(title: "あなた", score: hud.homeScore, color: Palette.home)
 
             Spacer()
 
             VStack(spacing: 2) {
-                Text("TIME")
+                Text("タイム")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.6))
                 Text("\(hud.remainingSeconds)")
@@ -405,7 +405,7 @@ private struct JoystickView: View {
 
 // Visual-only placeholders for future skills. Disabled; no game rule attached.
 private struct SkillSlots: View {
-    private let slots = ["Boost", "Block", "Shot"]
+    private let slots = ["ブースト", "ブロック", "ショット"]
 
     var body: some View {
         HStack(spacing: 10) {
@@ -447,7 +447,7 @@ struct StartView: View {
                     Text("Puck Clash")
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Vertical air hockey • 1v1 — beat the CPU on the rink")
+                    Text("縦型エアホッケー・1対1 — CPUに勝とう")
                         .font(.headline)
                         .foregroundStyle(.white.opacity(0.65))
                         .multilineTextAlignment(.center)
@@ -455,7 +455,7 @@ struct StartView: View {
 
                 VStack(spacing: 12) {
                     Button(action: onStart) {
-                        Text("Start")
+                        Text("スタート")
                             .font(.title2.weight(.bold))
                             .frame(maxWidth: 240)
                             .padding(.vertical, 16)
@@ -465,14 +465,14 @@ struct StartView: View {
                     .accessibilityIdentifier("start-match-button")
 
                     HStack(spacing: 12) {
-                        secondaryButton("How to Play", identifier: "how-to-play-button", action: onHowToPlay)
-                        secondaryButton("Settings", identifier: "settings-button", action: onSettings)
+                        secondaryButton("遊び方", identifier: "how-to-play-button", action: onHowToPlay)
+                        secondaryButton("設定", identifier: "settings-button", action: onSettings)
                     }
                     .frame(maxWidth: 240)
                 }
                 .padding(.top, 8)
 
-                Text("Online multiplayer — coming soon")
+                Text("オンライン対戦 — 準備中")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -526,11 +526,11 @@ struct ResultView: View {
     private var outcomeText: String {
         switch score.winner {
         case .home:
-            return "You Win"
+            return "あなたの勝ち"
         case .away:
-            return "CPU Wins"
+            return "CPUの勝ち"
         case nil:
-            return "Draw"
+            return "引き分け"
         }
     }
 
@@ -550,7 +550,7 @@ struct ResultView: View {
             ArenaBackground()
 
             VStack(spacing: 20) {
-                Text("Full Time")
+                Text("試合終了")
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.6))
 
@@ -559,14 +559,14 @@ struct ResultView: View {
                     .foregroundStyle(outcomeColor)
 
                 HStack(spacing: 20) {
-                    scoreCard(title: "YOU", value: score.home, color: Palette.home)
+                    scoreCard(title: "あなた", value: score.home, color: Palette.home)
                     Text("-").font(.system(size: 32, weight: .bold)).foregroundStyle(.white.opacity(0.5))
                     scoreCard(title: "CPU", value: score.away, color: Palette.away)
                 }
                 .padding(.vertical, 8)
 
                 Button(action: onRetry) {
-                    Text("Retry")
+                    Text("もう一度")
                         .font(.title2.weight(.bold))
                         .frame(maxWidth: 240)
                         .padding(.vertical, 16)
@@ -577,7 +577,7 @@ struct ResultView: View {
                 .padding(.top, 4)
 
                 Button(action: onBackToTitle) {
-                    Text("Back to Title")
+                    Text("タイトルへ")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.8))
                 }
@@ -630,7 +630,7 @@ private struct InfoScreen<Content: View>: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                     .accessibilityIdentifier(closeIdentifier)
-                    .accessibilityLabel("Close")
+                    .accessibilityLabel("閉じる")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -682,27 +682,27 @@ private struct SettingsView: View {
 
     var body: some View {
         InfoScreen(
-            title: "Settings",
+            title: "設定",
             screenIdentifier: "settings-screen",
             closeIdentifier: "close-settings-button",
             onClose: onClose
         ) {
-            InfoSection(title: "Game", lines: [
-                "Match type: CPU Practice available",
-                "Online Match: Coming Soon"
+            InfoSection(title: "ゲーム", lines: [
+                "対戦モード：CPU練習が利用可能",
+                "オンライン対戦：準備中"
             ])
-            InfoSection(title: "Controls", lines: [
-                "Move your lower striker with the joystick",
-                "Knock the puck into the opponent's goal"
+            InfoSection(title: "操作", lines: [
+                "ジョイスティックで下側のストライカーを動かす",
+                "パックを弾いて相手ゴールへ入れる"
             ])
-            InfoSection(title: "Maps", lines: [
-                "Classic — balanced standard rink",
-                "Wide — wider board, more angles",
-                "Speed — faster strikers and a livelier puck"
+            InfoSection(title: "マップ", lines: [
+                "クラシック — 標準的なバランス型リンク",
+                "ワイド — 広めの盤面で角度が増える",
+                "スピード — ストライカーとパックが速い"
             ])
-            InfoSection(title: "About", lines: [
-                "Prototype · local play focused",
-                "No real online yet"
+            InfoSection(title: "このアプリについて", lines: [
+                "プロトタイプ・ローカル対戦中心",
+                "オンラインは現在未対応"
             ])
         }
     }
@@ -714,29 +714,29 @@ private struct HowToPlayView: View {
 
     var body: some View {
         InfoScreen(
-            title: "How to Play",
+            title: "遊び方",
             screenIdentifier: "how-to-play-screen",
             closeIdentifier: "close-how-to-play-button",
             onClose: onClose
         ) {
-            InfoSection(title: "Goal", lines: [
-                "Get the puck into the opponent's goal at the top"
+            InfoSection(title: "目的", lines: [
+                "パックを上側の相手ゴールに入れる"
             ])
-            InfoSection(title: "Controls", lines: [
-                "Use the joystick in the lower-left to move your striker"
+            InfoSection(title: "操作", lines: [
+                "左下のジョイスティックで自分のストライカーを動かす"
             ])
-            InfoSection(title: "Rules", lines: [
-                "Puck in the top goal scores for you",
-                "Puck in the bottom goal scores for the CPU",
-                "When time runs out, the result is shown"
+            InfoSection(title: "ルール", lines: [
+                "上のゴールに入ると自分の得点",
+                "下のゴールに入るとCPUの得点",
+                "制限時間が終わると勝敗が表示される"
             ])
-            InfoSection(title: "Maps", lines: [
-                "Classic: standard",
-                "Wide: wider board",
-                "Speed: faster play"
+            InfoSection(title: "マップ", lines: [
+                "クラシック：標準",
+                "ワイド：広め",
+                "スピード：速め"
             ])
-            InfoSection(title: "Online", lines: [
-                "Coming Soon"
+            InfoSection(title: "オンライン", lines: [
+                "準備中"
             ])
         }
     }
