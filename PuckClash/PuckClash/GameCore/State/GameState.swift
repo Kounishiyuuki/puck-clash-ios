@@ -152,15 +152,15 @@ struct MapDefinition: Equatable, Identifiable {
 
     static let classic = MapDefinition(
         id: .classic,
-        displayName: "Classic",
-        summary: "Balanced standard rink",
+        displayName: "クラシック",
+        summary: "標準的な広さとスピードの基本マップ",
         config: .standard
     )
 
     static let wide = MapDefinition(
         id: .wide,
-        displayName: "Wide",
-        summary: "Wider board, more shooting angles",
+        displayName: "ワイド",
+        summary: "横幅が広く、角度を使った打ち返しがしやすいマップ",
         config: MatchConfig(
             rinkSize: Vector2(x: 560, y: 640),
             matchDuration: 180,
@@ -176,8 +176,8 @@ struct MapDefinition: Equatable, Identifiable {
 
     static let speed = MapDefinition(
         id: .speed,
-        displayName: "Speed",
-        summary: "Faster strikers and a livelier puck",
+        displayName: "スピード",
+        summary: "パックとストライカーの反応が速いテンポ重視のマップ",
         config: MatchConfig(
             rinkSize: Vector2(x: 500, y: 640),
             matchDuration: 180,

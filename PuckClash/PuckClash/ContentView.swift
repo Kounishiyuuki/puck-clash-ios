@@ -250,6 +250,7 @@ private struct SelectionCard: View {
                     Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
