@@ -65,11 +65,27 @@ private enum Palette {
 struct ContentView: View {
     @State private var flow: MatchFlow = .start
     @State private var matchID = UUID()
+    @State private var showSettings = false
+    @State private var showHowToPlay = false
 
     var body: some View {
+        content
+            .sheet(isPresented: $showSettings) {
+                SettingsView(onClose: { showSettings = false })
+            }
+            .sheet(isPresented: $showHowToPlay) {
+                HowToPlayView(onClose: { showHowToPlay = false })
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         switch flow {
         case .start:
-            StartView(onStart: { flow = .modeSelect })
+            StartView(
+                onStart: { flow = .modeSelect },
+                onSettings: { showSettings = true },
+                onHowToPlay: { showHowToPlay = true }
+            )
         case .modeSelect:
             ModeSelectView(
                 onSelectCPU: { flow = .mapSelect(.cpuPractice) },
@@ -416,6 +432,8 @@ private struct SkillSlots: View {
 
 struct StartView: View {
     let onStart: () -> Void
+    let onSettings: () -> Void
+    let onHowToPlay: () -> Void
 
     var body: some View {
         ZStack {
@@ -429,24 +447,51 @@ struct StartView: View {
                     Text("Puck Clash")
                         .font(.system(size: 46, weight: .heavy, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Vertical air hockey • 1v1")
+                    Text("Vertical air hockey • 1v1 — beat the CPU on the rink")
                         .font(.headline)
                         .foregroundStyle(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
                 }
 
-                Button(action: onStart) {
-                    Text("Start")
-                        .font(.title2.weight(.bold))
-                        .frame(maxWidth: 240)
-                        .padding(.vertical, 16)
-                        .background(Palette.home, in: RoundedRectangle(cornerRadius: 16))
-                        .foregroundStyle(.white)
+                VStack(spacing: 12) {
+                    Button(action: onStart) {
+                        Text("Start")
+                            .font(.title2.weight(.bold))
+                            .frame(maxWidth: 240)
+                            .padding(.vertical, 16)
+                            .background(Palette.home, in: RoundedRectangle(cornerRadius: 16))
+                            .foregroundStyle(.white)
+                    }
+                    .accessibilityIdentifier("start-match-button")
+
+                    HStack(spacing: 12) {
+                        secondaryButton("How to Play", identifier: "how-to-play-button", action: onHowToPlay)
+                        secondaryButton("Settings", identifier: "settings-button", action: onSettings)
+                    }
+                    .frame(maxWidth: 240)
                 }
-                .accessibilityIdentifier("start-match-button")
                 .padding(.top, 8)
+
+                Text("Online multiplayer — coming soon")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.5))
             }
             .padding()
         }
+    }
+
+    // Outlined secondary action styled to sit beneath the primary Start button.
+    private func secondaryButton(_ title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.2), lineWidth: 1))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -555,6 +600,145 @@ struct ResultView: View {
         .frame(width: 96)
         .padding(.vertical, 12)
         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// Reusable modal scaffold for the information screens: a titled header with a close
+// button over the shared arena background, and a scrolling body of sections. Holds no
+// game state — purely presentational.
+private struct InfoScreen<Content: View>: View {
+    let title: String
+    let screenIdentifier: String
+    let closeIdentifier: String
+    let onClose: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 0) {
+                HStack {
+                    Text(title)
+                        .font(.title.weight(.heavy))
+                        .foregroundStyle(.white)
+                        .accessibilityIdentifier(screenIdentifier)
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .accessibilityIdentifier(closeIdentifier)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 8)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        content()
+                    }
+                    .padding(20)
+                }
+            }
+        }
+    }
+}
+
+// A titled group of bullet lines used inside the information screens.
+private struct InfoSection: View {
+    let title: String
+    let lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Palette.accent)
+            ForEach(lines, id: \.self) { line in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(Palette.accent.opacity(0.6))
+                        .frame(width: 5, height: 5)
+                        .padding(.top, 7)
+                    Text(line)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// Information-only settings. No functional toggles, accounts, or network status —
+// it describes what the prototype currently offers.
+private struct SettingsView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        InfoScreen(
+            title: "Settings",
+            screenIdentifier: "settings-screen",
+            closeIdentifier: "close-settings-button",
+            onClose: onClose
+        ) {
+            InfoSection(title: "Game", lines: [
+                "Match type: CPU Practice available",
+                "Online Match: Coming Soon"
+            ])
+            InfoSection(title: "Controls", lines: [
+                "Move your lower striker with the joystick",
+                "Knock the puck into the opponent's goal"
+            ])
+            InfoSection(title: "Maps", lines: [
+                "Classic — balanced standard rink",
+                "Wide — wider board, more angles",
+                "Speed — faster strikers and a livelier puck"
+            ])
+            InfoSection(title: "About", lines: [
+                "Prototype · local play focused",
+                "No real online yet"
+            ])
+        }
+    }
+}
+
+// Explains the objective, controls, rules and maps. Online is noted as Coming Soon.
+private struct HowToPlayView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        InfoScreen(
+            title: "How to Play",
+            screenIdentifier: "how-to-play-screen",
+            closeIdentifier: "close-how-to-play-button",
+            onClose: onClose
+        ) {
+            InfoSection(title: "Goal", lines: [
+                "Get the puck into the opponent's goal at the top"
+            ])
+            InfoSection(title: "Controls", lines: [
+                "Use the joystick in the lower-left to move your striker"
+            ])
+            InfoSection(title: "Rules", lines: [
+                "Puck in the top goal scores for you",
+                "Puck in the bottom goal scores for the CPU",
+                "When time runs out, the result is shown"
+            ])
+            InfoSection(title: "Maps", lines: [
+                "Classic: standard",
+                "Wide: wider board",
+                "Speed: faster play"
+            ])
+            InfoSection(title: "Online", lines: [
+                "Coming Soon"
+            ])
+        }
     }
 }
 
