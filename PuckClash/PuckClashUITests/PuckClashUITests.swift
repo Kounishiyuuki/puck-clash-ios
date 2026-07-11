@@ -38,9 +38,51 @@ final class PuckClashUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // The start screen is the entry point; its Start button must be present.
+        // The start screen is the entry point; its Start button must be present,
+        // along with the Settings and How to Play entries.
         let startButton = app.buttons["start-match-button"]
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["settings-button"].exists)
+        XCTAssertTrue(app.buttons["how-to-play-button"].exists)
+    }
+
+    @MainActor
+    func testSettingsScreenOpensAndCloses() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let settingsButton = app.buttons["settings-button"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 5))
+        settingsButton.tap()
+
+        XCTAssertTrue(app.staticTexts["settings-screen"].waitForExistence(timeout: 5))
+
+        let closeButton = app.buttons["close-settings-button"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
+        closeButton.tap()
+
+        // Back on the home screen; the settings screen is gone.
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["settings-screen"].exists)
+    }
+
+    @MainActor
+    func testHowToPlayScreenOpensAndCloses() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let howToPlayButton = app.buttons["how-to-play-button"]
+        XCTAssertTrue(howToPlayButton.waitForExistence(timeout: 5))
+        howToPlayButton.tap()
+
+        XCTAssertTrue(app.staticTexts["how-to-play-screen"].waitForExistence(timeout: 5))
+
+        let closeButton = app.buttons["close-how-to-play-button"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
+        closeButton.tap()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["how-to-play-screen"].exists)
     }
 
     @MainActor
