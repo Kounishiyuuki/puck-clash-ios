@@ -432,32 +432,51 @@ private struct SkillSlots: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: onBoost) {
+            // Action is gated to the ready phase (so a cooldown tap is a clear no-op)
+            // rather than .disabled, which would grey out the active / cooldown look.
+            Button(action: { if boostPhase == .ready { onBoost() } }) {
                 slot(
-                    systemImage: boostPhase == .cooldown ? "hourglass" : "bolt.fill",
-                    iconColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5),
-                    fill: boostPhase == .active ? Palette.home.opacity(0.85) : .white.opacity(0.05),
-                    stroke: boostPhase == .ready ? Palette.home.opacity(0.9) : .white.opacity(0.2),
-                    label: boostLabel,
-                    labelColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5)
+                    systemImage: style.icon,
+                    iconColor: style.iconColor,
+                    fill: style.fill,
+                    stroke: style.stroke,
+                    strokeWidth: style.strokeWidth,
+                    label: style.label,
+                    labelColor: style.labelColor
                 )
+                .scaleEffect(boostPhase == .active ? 1.06 : 1.0)
+                .animation(.snappy(duration: 0.15), value: boostPhase)
             }
-            .disabled(boostPhase != .ready)
+            .buttonStyle(.plain)
             .accessibilityIdentifier("skill-boost-button")
+            .accessibilityValue(accessibilityValue)
 
             lockedSlot(name: "ブロック", identifier: "skill-block-button")
             lockedSlot(name: "ショット", identifier: "skill-shot-button")
         }
     }
 
-    private var boostLabel: String {
+    // Per-phase look: ready is inviting, active is bright, and cooldown reads as
+    // "recharging" (accent tint + hourglass) rather than a dead / permanently locked slot.
+    private var style: (icon: String, iconColor: Color, fill: Color, stroke: Color, strokeWidth: CGFloat, label: String, labelColor: Color) {
         switch boostPhase {
         case .ready:
-            return "ブースト"
+            return ("bolt.fill", .white, Palette.home.opacity(0.22), Palette.home.opacity(0.95), 2, "ブースト", .white.opacity(0.95))
+        case .active:
+            return ("bolt.fill", .white, Palette.home.opacity(0.95), .white.opacity(0.95), 3, "発動中", .white)
+        case .cooldown:
+            return ("hourglass", Palette.accent.opacity(0.85), .white.opacity(0.06), Palette.accent.opacity(0.5), 2, "CD \(boostRemainingSeconds)", Palette.accent.opacity(0.9))
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch boostPhase {
+        case .ready:
+            return "使用可能"
         case .active:
             return "発動中"
         case .cooldown:
-            return "CD \(boostRemainingSeconds)"
+            return "クールダウン \(boostRemainingSeconds)秒"
         }
     }
 
@@ -468,10 +487,12 @@ private struct SkillSlots: View {
                 iconColor: .white.opacity(0.3),
                 fill: .white.opacity(0.05),
                 stroke: .white.opacity(0.18),
+                strokeWidth: 2,
                 label: name,
                 labelColor: .white.opacity(0.45)
             )
         }
+        .buttonStyle(.plain)
         .disabled(true)
         .accessibilityIdentifier(identifier)
     }
@@ -481,12 +502,13 @@ private struct SkillSlots: View {
         iconColor: Color,
         fill: Color,
         stroke: Color,
+        strokeWidth: CGFloat,
         label: String,
         labelColor: Color
     ) -> some View {
         VStack(spacing: 4) {
             Circle()
-                .strokeBorder(stroke, lineWidth: 2)
+                .strokeBorder(stroke, lineWidth: strokeWidth)
                 .background(Circle().fill(fill))
                 .frame(width: 46, height: 46)
                 .overlay(
