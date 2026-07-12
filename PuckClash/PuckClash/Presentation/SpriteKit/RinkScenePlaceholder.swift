@@ -88,10 +88,25 @@ final class RinkScene: SKScene {
     // Only push a HUD snapshot when a displayed value actually changed, so SwiftUI
     // is not re-rendered every frame.
     private func publishHUD(_ state: GameState, force: Bool) {
+        // Derive the home Boost button state from the simulation. A coarse whole-second
+        // value keeps the HUD publishing at the same low frequency as the score/clock.
+        let boost = state.homeBoost
+        let boostRemainingSeconds: Int
+        switch boost.phase {
+        case .active:
+            boostRemainingSeconds = Int(boost.activeRemaining.rounded(.up))
+        case .cooldown:
+            boostRemainingSeconds = Int(boost.cooldownRemaining.rounded(.up))
+        case .ready:
+            boostRemainingSeconds = 0
+        }
+
         let snapshot = MatchHUD(
             homeScore: state.score.home,
             awayScore: state.score.away,
-            remainingSeconds: Int(state.remainingTime.rounded(.up))
+            remainingSeconds: Int(state.remainingTime.rounded(.up)),
+            boostPhase: boost.phase,
+            boostRemainingSeconds: boostRemainingSeconds
         )
         if force || snapshot != lastHUD {
             lastHUD = snapshot

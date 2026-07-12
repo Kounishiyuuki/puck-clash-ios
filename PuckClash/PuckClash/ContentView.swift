@@ -27,6 +27,8 @@ struct MatchHUD: Equatable {
     var homeScore = 0
     var awayScore = 0
     var remainingSeconds = 0
+    var boostPhase: SkillPhase = .ready
+    var boostRemainingSeconds = 0
 }
 
 // Owns the match: a LocalMatchSession (the simulation) and the RinkScene that renders
@@ -45,6 +47,11 @@ final class MatchController: ObservableObject {
         scene.onHUDChange = { [weak self] snapshot in
             self?.hud = snapshot
         }
+    }
+
+    // Fire the local player's Boost skill; the session edge-triggers it onto one step.
+    func activateBoost() {
+        session.activateHomeSkill(.boost)
     }
 
     // Joystick vector goes straight to the session (not through @Published) so dragging
@@ -281,7 +288,12 @@ struct MatchView: View {
             MatchHUDBar(hud: controller.hud)
         }
         .safeAreaInset(edge: .bottom) {
-            BottomControls(onMove: { controller.setMoveVector($0) })
+            BottomControls(
+                onMove: { controller.setMoveVector($0) },
+                boostPhase: controller.hud.boostPhase,
+                boostRemainingSeconds: controller.hud.boostRemainingSeconds,
+                onBoost: { controller.activateBoost() }
+            )
         }
     }
 }
@@ -329,15 +341,22 @@ private struct MatchHUDBar: View {
     }
 }
 
-// Bottom control zone: joystick on the left, skill placeholders on the right.
+// Bottom control zone: joystick on the left, skill buttons on the right.
 private struct BottomControls: View {
     let onMove: (Vector2) -> Void
+    let boostPhase: SkillPhase
+    let boostRemainingSeconds: Int
+    let onBoost: () -> Void
 
     var body: some View {
         HStack(alignment: .center) {
             JoystickView(onMove: onMove)
             Spacer()
-            SkillSlots()
+            SkillSlots(
+                boostPhase: boostPhase,
+                boostRemainingSeconds: boostRemainingSeconds,
+                onBoost: onBoost
+            )
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 10)
@@ -404,30 +423,83 @@ private struct JoystickView: View {
     }
 }
 
-// Visual-only placeholders for future skills. Disabled; no game rule attached.
+// Skill buttons. Boost is live (enabled while ready, showing active / cooldown state);
+// Block and Shot stay locked "準備中" placeholders with no game rule attached.
 private struct SkillSlots: View {
-    private let slots = ["ブースト", "ブロック", "ショット"]
+    let boostPhase: SkillPhase
+    let boostRemainingSeconds: Int
+    let onBoost: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            ForEach(slots, id: \.self) { name in
-                VStack(spacing: 4) {
-                    Circle()
-                        .strokeBorder(.white.opacity(0.18), lineWidth: 2)
-                        .background(Circle().fill(.white.opacity(0.05)))
-                        .frame(width: 46, height: 46)
-                        .overlay(
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.3))
-                        )
-                    Text(name)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
+            Button(action: onBoost) {
+                slot(
+                    systemImage: boostPhase == .cooldown ? "hourglass" : "bolt.fill",
+                    iconColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5),
+                    fill: boostPhase == .active ? Palette.home.opacity(0.85) : .white.opacity(0.05),
+                    stroke: boostPhase == .ready ? Palette.home.opacity(0.9) : .white.opacity(0.2),
+                    label: boostLabel,
+                    labelColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5)
+                )
             }
+            .disabled(boostPhase != .ready)
+            .accessibilityIdentifier("skill-boost-button")
+
+            lockedSlot(name: "ブロック", identifier: "skill-block-button")
+            lockedSlot(name: "ショット", identifier: "skill-shot-button")
+        }
+    }
+
+    private var boostLabel: String {
+        switch boostPhase {
+        case .ready:
+            return "ブースト"
+        case .active:
+            return "発動中"
+        case .cooldown:
+            return "CD \(boostRemainingSeconds)"
+        }
+    }
+
+    private func lockedSlot(name: String, identifier: String) -> some View {
+        Button(action: {}) {
+            slot(
+                systemImage: "lock.fill",
+                iconColor: .white.opacity(0.3),
+                fill: .white.opacity(0.05),
+                stroke: .white.opacity(0.18),
+                label: name,
+                labelColor: .white.opacity(0.45)
+            )
         }
         .disabled(true)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func slot(
+        systemImage: String,
+        iconColor: Color,
+        fill: Color,
+        stroke: Color,
+        label: String,
+        labelColor: Color
+    ) -> some View {
+        VStack(spacing: 4) {
+            Circle()
+                .strokeBorder(stroke, lineWidth: 2)
+                .background(Circle().fill(fill))
+                .frame(width: 46, height: 46)
+                .overlay(
+                    Image(systemName: systemImage)
+                        .font(.system(size: 14))
+                        .foregroundStyle(iconColor)
+                )
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(labelColor)
+                .monospacedDigit()
+        }
+        .frame(width: 52)
     }
 }
 

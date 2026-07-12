@@ -47,6 +47,46 @@ enum MatchPhase: Equatable {
     case finished
 }
 
+enum SkillID: CaseIterable, Hashable {
+    case boost
+    case block
+    case shot
+}
+
+enum SkillPhase: Equatable {
+    case ready
+    case active
+    case cooldown
+}
+
+// Runtime state of a single skill: how long its effect and its cooldown still have to
+// run. Advanced by GameEngine each fixed step, so it lives inside GameState and travels
+// in MatchSnapshot.state. `ready` is the initial, unused state.
+struct SkillState: Equatable {
+    var activeRemaining: TimeInterval
+    var cooldownRemaining: TimeInterval
+
+    static let ready = SkillState(activeRemaining: 0, cooldownRemaining: 0)
+
+    var phase: SkillPhase {
+        if activeRemaining > 0 {
+            return .active
+        }
+        if cooldownRemaining > 0 {
+            return .cooldown
+        }
+        return .ready
+    }
+}
+
+// Tunable Boost skill parameters. Held by MatchConfig so both sides of a match agree
+// on the same values (important for future non-local sessions).
+struct BoostConfig: Equatable {
+    var speedMultiplier: Double = 1.6
+    var duration: TimeInterval = 2.0
+    var cooldown: TimeInterval = 6.0
+}
+
 // Vertical air-hockey board: home defends the bottom (y = 0) and attacks the top
 // goal (y = rinkSize.y); away is the mirror. Goals are an X-range mouth on the
 // top/bottom edges; the left/right edges are always walls.
@@ -65,6 +105,8 @@ struct MatchConfig: Equatable {
     // time; sessions convert real frame time into fixed steps of 1/tickRate so the
     // simulation is frame-rate independent, in preparation for online play.
     let tickRate: Double
+    // Boost skill tuning, agreed by both sides of the match.
+    let boost: BoostConfig
 
     init(
         rinkSize: Vector2,
@@ -77,7 +119,8 @@ struct MatchConfig: Equatable {
         wallRestitution: Double = 1.0,
         puckDamping: Double = 1.0,
         puckStopSpeed: Double = 0,
-        tickRate: Double = 60
+        tickRate: Double = 60,
+        boost: BoostConfig = BoostConfig()
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -90,6 +133,7 @@ struct MatchConfig: Equatable {
         self.puckDamping = puckDamping
         self.puckStopSpeed = puckStopSpeed
         self.tickRate = tickRate
+        self.boost = boost
     }
 
     var rinkCenter: Vector2 {
@@ -202,6 +246,8 @@ struct GameState: Equatable {
     var homePlayer: PlayerState
     var awayPlayer: PlayerState
     var puck: PuckState
+    var homeBoost: SkillState
+    var awayBoost: SkillState
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
@@ -224,7 +270,9 @@ struct GameState: Equatable {
             puck: PuckState(
                 position: config.rinkCenter,
                 velocity: .zero
-            )
+            ),
+            homeBoost: .ready,
+            awayBoost: .ready
         )
     }
 }
