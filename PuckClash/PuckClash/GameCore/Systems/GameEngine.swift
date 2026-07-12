@@ -28,16 +28,23 @@ struct GameEngine {
         let homeInput = latestInput(for: .home, in: inputs)
         let awayInput = latestInput(for: .away, in: inputs) ?? awayCPUInput()
 
+        // Boost activation (input is already edge-triggered by the session): a ready
+        // boost becomes active; a request while active or on cooldown is ignored.
+        state.homeBoost = boostActivated(state.homeBoost, requested: homeInput?.activatedSkills.contains(.boost) ?? false)
+        state.awayBoost = boostActivated(state.awayBoost, requested: awayInput.activatedSkills.contains(.boost))
+
         state.homePlayer = movedStriker(
             state.homePlayer,
             moveVector: homeInput?.moveVector,
             target: homeInput?.targetPosition,
+            maxSpeed: effectiveStrikerSpeed(boost: state.homeBoost),
             deltaTime: deltaTime
         )
         state.awayPlayer = movedStriker(
             state.awayPlayer,
             moveVector: awayInput.moveVector,
             target: awayInput.targetPosition,
+            maxSpeed: effectiveStrikerSpeed(boost: state.awayBoost),
             deltaTime: deltaTime
         )
 
@@ -45,6 +52,40 @@ struct GameEngine {
         resolveStrikerPuckCollision(with: state.awayPlayer)
 
         updatePuck(deltaTime: deltaTime)
+
+        // Advance skill timers with the same fixed deltaTime so they are deterministic.
+        state.homeBoost = boostAdvanced(state.homeBoost, deltaTime: deltaTime)
+        state.awayBoost = boostAdvanced(state.awayBoost, deltaTime: deltaTime)
+    }
+
+    // A ready boost with a fresh request starts its active window; otherwise unchanged.
+    private func boostActivated(_ boost: SkillState, requested: Bool) -> SkillState {
+        guard requested, boost.phase == .ready else {
+            return boost
+        }
+        var updated = boost
+        updated.activeRemaining = state.config.boost.duration
+        return updated
+    }
+
+    // The striker's max speed, scaled by the boost multiplier while its effect is active.
+    private func effectiveStrikerSpeed(boost: SkillState) -> Double {
+        let multiplier = boost.activeRemaining > 0 ? state.config.boost.speedMultiplier : 1
+        return state.config.strikerMaxSpeed * multiplier
+    }
+
+    // Count down the active window, then (once it ends) the cooldown, back to ready.
+    private func boostAdvanced(_ boost: SkillState, deltaTime: TimeInterval) -> SkillState {
+        var updated = boost
+        if updated.activeRemaining > 0 {
+            updated.activeRemaining = max(0, updated.activeRemaining - deltaTime)
+            if updated.activeRemaining == 0 {
+                updated.cooldownRemaining = state.config.boost.cooldown
+            }
+        } else if updated.cooldownRemaining > 0 {
+            updated.cooldownRemaining = max(0, updated.cooldownRemaining - deltaTime)
+        }
+        return updated
     }
 
     private func latestInput(for playerId: PlayerID, in inputs: [PlayerInput]) -> PlayerInput? {
@@ -61,6 +102,7 @@ struct GameEngine {
         _ striker: PlayerState,
         moveVector: Vector2?,
         target: Vector2?,
+        maxSpeed: Double,
         deltaTime: TimeInterval
     ) -> PlayerState {
         var updated = striker
@@ -69,12 +111,12 @@ struct GameEngine {
         if let moveVector {
             // Treat magnitude as 0...1; anything longer is clamped to a unit vector.
             let bounded = moveVector.length > 1 ? moveVector.normalized : moveVector
-            let step = bounded * (state.config.strikerMaxSpeed * deltaTime)
+            let step = bounded * (maxSpeed * deltaTime)
             newPosition = clampedToHalf(striker.position + step, side: striker.side)
         } else if let target {
             let desired = clampedToHalf(target, side: striker.side)
             let toTarget = desired - striker.position
-            let maxStep = state.config.strikerMaxSpeed * deltaTime
+            let maxStep = maxSpeed * deltaTime
             let step = toTarget.length <= maxStep ? toTarget : toTarget.normalized * maxStep
             newPosition = clampedToHalf(striker.position + step, side: striker.side)
         }
@@ -238,7 +280,14 @@ protocol MatchSession: AnyObject {
     var config: MatchConfig { get }
     var state: GameState { get }
     func setHomeInput(moveVector: Vector2?)
+    func activateHomeSkill(_ skill: SkillID)
     @discardableResult func advance(deltaTime: TimeInterval) -> MatchSnapshot
+}
+
+extension MatchSession {
+    // Default: the local player's skill activation is only meaningful for sessions that
+    // run the simulation. Reserved for future non-local session handling.
+    func activateHomeSkill(_ skill: SkillID) {}
 }
 
 // Runs the match entirely on-device by owning a GameEngine. Home input arrives as
@@ -259,6 +308,9 @@ final class LocalMatchSession: MatchSession {
     private var accumulatedTime: TimeInterval = 0
     // Fixed-step counter: +1 for each engine.update(fixedDelta). Reported in snapshots.
     private var tick = 0
+    // Skill activations requested since the last consumed step; applied to exactly one
+    // fixed step (edge-triggered) so holding the button or a catch-up burst fires once.
+    private var pendingSkillActivations: Set<SkillID> = []
 
     init(config: MatchConfig) {
         self.config = config
@@ -279,26 +331,28 @@ final class LocalMatchSession: MatchSession {
         }
     }
 
+    // Queue a skill for the local (home) player; consumed by the next fixed step.
+    func activateHomeSkill(_ skill: SkillID) {
+        pendingSkillActivations.insert(skill)
+    }
+
     // Accumulate the real frame delta and drain it in fixed 1/tickRate steps, so the
-    // simulation advances at a frame-rate-independent rate. The same home input is
-    // applied to every step of one advance; the away CPU stays inside GameEngine.
-    // A delta shorter than one step runs zero steps and carries over to next time.
-    // Each step advances `tick`; the snapshot is always authoritative for local play.
+    // simulation advances at a frame-rate-independent rate. The move vector is applied
+    // to every step; a pending skill activation is applied to only the first step and
+    // then cleared, so it fires once even across a catch-up burst. If no step runs
+    // (delta shorter than one step), the pending activation carries over to next time.
     @discardableResult
     func advance(deltaTime: TimeInterval) -> MatchSnapshot {
         let fixedDelta = 1.0 / config.tickRate
         accumulatedTime += max(0, deltaTime)
 
-        let inputs: [PlayerInput]
-        if let homeMoveVector {
-            inputs = [PlayerInput(playerId: .home, moveVector: homeMoveVector)]
-        } else {
-            inputs = []
-        }
-
         var steps = 0
         while accumulatedTime >= fixedDelta, steps < Self.maxCatchUpSteps {
-            engine.update(deltaTime: fixedDelta, inputs: inputs)
+            let activations = steps == 0 ? pendingSkillActivations : []
+            engine.update(deltaTime: fixedDelta, inputs: homeInputs(activatedSkills: activations))
+            if steps == 0 {
+                pendingSkillActivations.removeAll()
+            }
             accumulatedTime -= fixedDelta
             tick += 1
             steps += 1
@@ -310,5 +364,14 @@ final class LocalMatchSession: MatchSession {
         }
 
         return MatchSnapshot(tick: tick, state: engine.state, isAuthoritative: true)
+    }
+
+    // Build the home input for one fixed step. Returns no input only when there is
+    // neither movement nor a skill activation to apply.
+    private func homeInputs(activatedSkills: Set<SkillID>) -> [PlayerInput] {
+        guard homeMoveVector != nil || !activatedSkills.isEmpty else {
+            return []
+        }
+        return [PlayerInput(playerId: .home, moveVector: homeMoveVector, activatedSkills: activatedSkills)]
     }
 }

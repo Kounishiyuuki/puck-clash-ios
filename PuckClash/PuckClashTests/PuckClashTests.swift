@@ -854,4 +854,142 @@ struct PuckClashTests {
         #expect(session.advance(deltaTime: 0.1) == server)
         #expect(session.advance(deltaTime: 0.1) == server)
     }
+
+    // MARK: - Boost skill
+
+    @Test func boostIncreasesHomeStrikerSpeed() {
+        let start = GameState.initial(config: config).homePlayer.position.x
+        let move = Vector2(x: 1, y: 0)
+
+        var plain = GameEngine(state: .initial(config: config))
+        plain.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, moveVector: move)])
+
+        var boosted = GameEngine(state: .initial(config: config))
+        boosted.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: move, activatedSkills: [.boost])]
+        )
+
+        let plainStep = plain.state.homePlayer.position.x - start
+        let boostedStep = boosted.state.homePlayer.position.x - start
+        #expect(boostedStep > plainStep)
+        #expect(boostedStep == plainStep * config.boost.speedMultiplier)
+        #expect(boosted.state.homeBoost.phase == .active)
+    }
+
+    @Test func boostSpeedReturnsToNormalAfterDuration() {
+        var engine = GameEngine(state: .initial(config: config))
+        // Activate, then run past the active window (no movement) so it enters cooldown.
+        engine.update(deltaTime: 0.5, inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])])
+        engine.update(deltaTime: config.boost.duration, inputs: [])
+        #expect(engine.state.homeBoost.phase == .cooldown)
+
+        // A move step now runs at normal speed (1000 * 0.01 = 10), not boosted.
+        let before = engine.state.homePlayer.position.x
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0))])
+        #expect(engine.state.homePlayer.position.x - before == 10)
+    }
+
+    @Test func boostCannotReactivateDuringCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        // One long step drives the boost through its active window into cooldown.
+        engine.update(
+            deltaTime: config.boost.duration + 0.5,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])]
+        )
+        #expect(engine.state.homeBoost.phase == .cooldown)
+
+        let before = engine.state.homePlayer.position.x
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.boost])]
+        )
+        // Re-activation is ignored on cooldown, so the step is normal speed.
+        #expect(engine.state.homePlayer.position.x - before == 10)
+        #expect(engine.state.homeBoost.phase == .cooldown)
+    }
+
+    @Test func boostReactivatesAfterCooldown() {
+        let start = GameState.initial(config: config).homePlayer.position.x
+        var engine = GameEngine(state: .initial(config: config))
+        // Active window -> cooldown, then let the cooldown fully elapse -> ready.
+        engine.update(
+            deltaTime: config.boost.duration,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])]
+        )
+        engine.update(deltaTime: config.boost.cooldown, inputs: [])
+        #expect(engine.state.homeBoost.phase == .ready)
+
+        let before = engine.state.homePlayer.position.x
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.boost])]
+        )
+        // Boosted again: 1000 * 1.6 * 0.01 = 16.
+        #expect(engine.state.homePlayer.position.x - before == 16)
+        #expect(before == start) // it never moved before this step
+    }
+
+    @Test func boostDoesNotActivateAfterMatchEnds() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 12, inputs: []) // matchDuration is 10 -> finished
+        #expect(engine.state.phase == .finished)
+
+        let before = engine.state.homePlayer.position
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.boost])]
+        )
+        #expect(engine.state.homeBoost.phase == .ready)
+        #expect(engine.state.homePlayer.position == before)
+    }
+
+    @Test func repeatedBoostInputDoesNotResetDuration() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 0.5, inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])])
+        #expect(engine.state.homeBoost.activeRemaining == config.boost.duration - 0.5)
+
+        // A second activation while still active must not refill the active window.
+        engine.update(deltaTime: 0.5, inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])])
+        #expect(engine.state.homeBoost.activeRemaining == config.boost.duration - 1.0)
+    }
+
+    @Test func localSessionActivatesBoostOnNextAdvance() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.boost)
+        let snapshot = session.advance(deltaTime: fixedDelta)
+
+        #expect(snapshot.state.homeBoost.phase == .active)
+        #expect(snapshot.state.homeBoost.activeRemaining > 0)
+    }
+
+    @Test func localSessionCarriesBoostActivationAcrossSubStepAdvance() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.boost)
+        // Sub-step advance runs no fixed step: the activation must wait, not fire.
+        let s1 = session.advance(deltaTime: fixedDelta * 0.5)
+        #expect(s1.state.homeBoost.phase == .ready)
+
+        // Completing the step consumes the still-pending activation.
+        let s2 = session.advance(deltaTime: fixedDelta * 0.5)
+        #expect(s2.state.homeBoost.phase == .active)
+    }
+
+    @Test func localSessionBoostFiresOnceAcrossCatchUp() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.boost)
+        // A large delta drains several fixed steps in one advance; boost must fire on
+        // the first step only and then just tick down (not re-fire each step).
+        let snapshot = session.advance(deltaTime: fixedDelta * 4)
+
+        #expect(snapshot.state.homeBoost.phase == .active)
+        let expected = config.boost.duration - 4 * fixedDelta
+        #expect(abs(snapshot.state.homeBoost.activeRemaining - expected) < 1e-9)
+    }
 }
