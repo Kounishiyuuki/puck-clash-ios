@@ -13,6 +13,7 @@ final class RinkScene: SKScene {
     private var lastScore: ScoreState?
     private var lastPuckSpeed: Double = 0
     private var lastBoostPhase: SkillPhase = .ready
+    private var lastShotPhase: SkillPhase = .ready
     private var lastUpdateTime: TimeInterval?
 
     private let rinkNode = SKShapeNode()
@@ -27,6 +28,7 @@ final class RinkScene: SKScene {
     private let homeStrikerNode = SKShapeNode()
     private let homeStrikerInnerNode = SKShapeNode()
     private let homeBoostRingNode = SKShapeNode()
+    private let homeShotRingNode = SKShapeNode()
     private let awayStrikerNode = SKShapeNode()
     private let awayStrikerInnerNode = SKShapeNode()
     private let puckNode = SKShapeNode()
@@ -103,12 +105,26 @@ final class RinkScene: SKScene {
             boostRemainingSeconds = 0
         }
 
+        // Same coarse whole-second derivation for the Shot button.
+        let shot = state.homeShot
+        let shotRemainingSeconds: Int
+        switch shot.phase {
+        case .active:
+            shotRemainingSeconds = Int(shot.activeRemaining.rounded(.up))
+        case .cooldown:
+            shotRemainingSeconds = Int(shot.cooldownRemaining.rounded(.up))
+        case .ready:
+            shotRemainingSeconds = 0
+        }
+
         let snapshot = MatchHUD(
             homeScore: state.score.home,
             awayScore: state.score.away,
             remainingSeconds: Int(state.remainingTime.rounded(.up)),
             boostPhase: boost.phase,
-            boostRemainingSeconds: boostRemainingSeconds
+            boostRemainingSeconds: boostRemainingSeconds,
+            shotPhase: shot.phase,
+            shotRemainingSeconds: shotRemainingSeconds
         )
         if force || snapshot != lastHUD {
             lastHUD = snapshot
@@ -155,6 +171,19 @@ final class RinkScene: SKScene {
             homeBoostRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "boostRing")
         }
         lastBoostPhase = boostPhase
+
+        // Shot feedback: an aim ring while armed, faded out once it fires or expires. Uses
+        // its own node/key so it never fights the boost ring; the extra punch on a landed
+        // shot comes for free from the puck speed-jump pulse above.
+        let shotPhase = state.homeShot.phase
+        if shotPhase == .active, lastShotPhase != .active {
+            homeShotRingNode.removeAction(forKey: "shotRing")
+            homeShotRingNode.run(.fadeAlpha(to: 0.85, duration: 0.12), withKey: "shotRing")
+        } else if shotPhase != .active, lastShotPhase == .active {
+            homeShotRingNode.removeAction(forKey: "shotRing")
+            homeShotRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "shotRing")
+        }
+        lastShotPhase = shotPhase
     }
 
     private func flash(_ node: SKShapeNode) {
@@ -211,6 +240,14 @@ final class RinkScene: SKScene {
         homeBoostRingNode.fillColor = .clear
         homeBoostRingNode.alpha = 0
         homeStrikerNode.addChild(homeBoostRingNode)
+
+        // Hidden until Shot is armed; an outer aim ring in the attacking (away) colour.
+        // A larger radius than the boost ring so the two can show at once without merging.
+        homeShotRingNode.strokeColor = awayColor
+        homeShotRingNode.lineWidth = 3
+        homeShotRingNode.fillColor = .clear
+        homeShotRingNode.alpha = 0
+        homeStrikerNode.addChild(homeShotRingNode)
 
         puckNode.fillColor = SKColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         puckNode.strokeColor = SKColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
@@ -290,6 +327,7 @@ final class RinkScene: SKScene {
         homeStrikerNode.path = discPath(radius: strikerRadius)
         homeStrikerInnerNode.path = discPath(radius: strikerRadius * 0.55)
         homeBoostRingNode.path = discPath(radius: strikerRadius * 1.35)
+        homeShotRingNode.path = discPath(radius: strikerRadius * 1.55)
         homeStrikerNode.position = scenePoint(for: state.homePlayer.position, config: config, rinkFrame: frame)
 
         awayStrikerNode.path = discPath(radius: strikerRadius)

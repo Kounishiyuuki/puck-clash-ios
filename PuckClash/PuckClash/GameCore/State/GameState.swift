@@ -87,6 +87,16 @@ struct BoostConfig: Equatable {
     var cooldown: TimeInterval = 6.0
 }
 
+// Tunable Shot skill parameters. Like BoostConfig, held by MatchConfig so both sides
+// agree on the same values. Shot treats phase == .active as "armed": the first effective
+// puck hit within activeDuration is amplified by speedMultiplier, then the skill goes on
+// cooldown. If the armed window elapses with no hit, it goes on cooldown unused.
+struct ShotConfig: Equatable {
+    var speedMultiplier: Double = 1.8
+    var activeDuration: TimeInterval = 1.2
+    var cooldown: TimeInterval = 7.0
+}
+
 // Vertical air-hockey board: home defends the bottom (y = 0) and attacks the top
 // goal (y = rinkSize.y); away is the mirror. Goals are an X-range mouth on the
 // top/bottom edges; the left/right edges are always walls.
@@ -107,6 +117,8 @@ struct MatchConfig: Equatable {
     let tickRate: Double
     // Boost skill tuning, agreed by both sides of the match.
     let boost: BoostConfig
+    // Shot skill tuning, agreed by both sides of the match.
+    let shot: ShotConfig
 
     init(
         rinkSize: Vector2,
@@ -120,7 +132,8 @@ struct MatchConfig: Equatable {
         puckDamping: Double = 1.0,
         puckStopSpeed: Double = 0,
         tickRate: Double = 60,
-        boost: BoostConfig = BoostConfig()
+        boost: BoostConfig = BoostConfig(),
+        shot: ShotConfig = ShotConfig()
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -134,6 +147,7 @@ struct MatchConfig: Equatable {
         self.puckStopSpeed = puckStopSpeed
         self.tickRate = tickRate
         self.boost = boost
+        self.shot = shot
     }
 
     var rinkCenter: Vector2 {
@@ -248,6 +262,8 @@ struct GameState: Equatable {
     var puck: PuckState
     var homeBoost: SkillState
     var awayBoost: SkillState
+    var homeShot: SkillState
+    var awayShot: SkillState
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
@@ -272,7 +288,9 @@ struct GameState: Equatable {
                 velocity: .zero
             ),
             homeBoost: .ready,
-            awayBoost: .ready
+            awayBoost: .ready,
+            homeShot: .ready,
+            awayShot: .ready
         )
     }
 }

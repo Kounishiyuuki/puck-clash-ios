@@ -992,4 +992,149 @@ struct PuckClashTests {
         let expected = config.boost.duration - 4 * fixedDelta
         #expect(abs(snapshot.state.homeBoost.activeRemaining - expected) < 1e-9)
     }
+
+    // MARK: - Shot skill
+
+    @Test func shotActivationArmsShot() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+        #expect(engine.state.homeShot.phase == .active)
+        #expect(engine.state.homeShot.activeRemaining > 0)
+    }
+
+    @Test func armedShotHitsPuckHarder() {
+        // Same striker-into-puck collision, with and without an armed Shot.
+        func puckVelocityYAfterHit(withShot: Bool) -> Double {
+            var state = GameState.initial(config: config)
+            state.homePlayer.position = Vector2(x: 50, y: 80)
+            var engine = GameEngine(state: state)
+            let skills: Set<SkillID> = withShot ? [.shot] : []
+            engine.update(
+                deltaTime: 0.1,
+                inputs: [PlayerInput(playerId: .home, targetPosition: Vector2(x: 50, y: 100), activatedSkills: skills, timestamp: 1)]
+            )
+            return engine.state.puck.velocity.y
+        }
+
+        let plain = puckVelocityYAfterHit(withShot: false)
+        let shot = puckVelocityYAfterHit(withShot: true)
+        #expect(shot > plain)
+        // The armed hit scales the impulse by exactly speedMultiplier (400 -> 720).
+        #expect(shot == plain * config.shot.speedMultiplier)
+    }
+
+    @Test func shotIsConsumedOnHitAndEntersCooldown() {
+        var state = GameState.initial(config: config)
+        state.homePlayer.position = Vector2(x: 50, y: 80)
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [PlayerInput(playerId: .home, targetPosition: Vector2(x: 50, y: 100), activatedSkills: [.shot], timestamp: 1)]
+        )
+
+        // The single hit consumed the armed shot: window is zeroed and it is on cooldown.
+        #expect(engine.state.homeShot.phase == .cooldown)
+        #expect(engine.state.homeShot.activeRemaining == 0)
+    }
+
+    @Test func shotCannotReactivateDuringCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        // Arm it, then let the window elapse unused so it drops to cooldown.
+        engine.update(
+            deltaTime: config.shot.activeDuration + 0.5,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])]
+        )
+        #expect(engine.state.homeShot.phase == .cooldown)
+        let cooldownBefore = engine.state.homeShot.cooldownRemaining
+
+        // A re-activation request on cooldown is ignored; it stays on cooldown, still ticking.
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+        #expect(engine.state.homeShot.phase == .cooldown)
+        #expect(engine.state.homeShot.cooldownRemaining < cooldownBefore)
+    }
+
+    @Test func shotReactivatesAfterCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        // Armed window straight into cooldown, then let the cooldown fully elapse -> ready.
+        engine.update(
+            deltaTime: config.shot.activeDuration,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])]
+        )
+        engine.update(deltaTime: config.shot.cooldown, inputs: [])
+        #expect(engine.state.homeShot.phase == .ready)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+        #expect(engine.state.homeShot.phase == .active)
+    }
+
+    @Test func shotWhiffEntersCooldownAfterDuration() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 0.5, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+        #expect(engine.state.homeShot.phase == .active)
+
+        // No collision happens; once the armed window elapses it enters cooldown.
+        engine.update(deltaTime: config.shot.activeDuration, inputs: [])
+        #expect(engine.state.homeShot.phase == .cooldown)
+    }
+
+    @Test func shotDoesNotActivateAfterMatchEnds() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 12, inputs: []) // matchDuration is 10 -> finished
+        #expect(engine.state.phase == .finished)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+        #expect(engine.state.homeShot.phase == .ready)
+    }
+
+    @Test func shotIsNotConsumedByNonImpulseOverlap() {
+        var state = GameState.initial(config: config)
+        // Striker and puck overlap, but the puck is separating (moving away): no impulse.
+        state.homePlayer.position = Vector2(x: 50, y: 100)
+        state.puck.position = Vector2(x: 50, y: 110)
+        state.puck.velocity = Vector2(x: 0, y: 60)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.shot])])
+
+        // The non-closing contact must not consume the shot; it stays armed.
+        #expect(engine.state.homeShot.phase == .active)
+    }
+
+    @Test func localSessionActivatesShotOnNextAdvance() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.shot)
+        let snapshot = session.advance(deltaTime: fixedDelta)
+
+        #expect(snapshot.state.homeShot.phase == .active)
+        #expect(snapshot.state.homeShot.activeRemaining > 0)
+    }
+
+    @Test func localSessionShotFiresOnceAcrossCatchUp() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.shot)
+        // Several fixed steps drain in one advance; shot must arm on the first step only
+        // and then just tick down, not re-arm each step.
+        let snapshot = session.advance(deltaTime: fixedDelta * 4)
+
+        #expect(snapshot.state.homeShot.phase == .active)
+        let expected = config.shot.activeDuration - 4 * fixedDelta
+        #expect(abs(snapshot.state.homeShot.activeRemaining - expected) < 1e-9)
+    }
+
+    @Test func blockActivationHasNoEffect() {
+        var engine = GameEngine(state: .initial(config: config))
+        // Block is not implemented: requesting it changes no skill state and movement is
+        // at normal speed.
+        engine.update(
+            deltaTime: 0.5,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.block])]
+        )
+        #expect(engine.state.homeBoost.phase == .ready)
+        #expect(engine.state.homeShot.phase == .ready)
+    }
 }
