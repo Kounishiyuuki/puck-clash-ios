@@ -47,7 +47,11 @@ enum MatchPhase: Equatable {
     case finished
 }
 
-enum SkillID: CaseIterable, Hashable {
+// nonisolated because the build default is main-actor isolation: without it SkillID's
+// synthesized Hashable conformance would be main-actor-isolated, and hashing Set<SkillID>
+// in the nonisolated GameEngine / PlayerInput is an error under the Swift 6 language mode.
+// GameCore is pure, isolation-free data, so this is the correct home for the annotation.
+nonisolated enum SkillID: CaseIterable, Hashable {
     case boost
     case block
     case shot
