@@ -29,6 +29,8 @@ struct MatchHUD: Equatable {
     var remainingSeconds = 0
     var boostPhase: SkillPhase = .ready
     var boostRemainingSeconds = 0
+    var shotPhase: SkillPhase = .ready
+    var shotRemainingSeconds = 0
 }
 
 // Owns the match: a LocalMatchSession (the simulation) and the RinkScene that renders
@@ -52,6 +54,11 @@ final class MatchController: ObservableObject {
     // Fire the local player's Boost skill; the session edge-triggers it onto one step.
     func activateBoost() {
         session.activateHomeSkill(.boost)
+    }
+
+    // Fire the local player's Shot skill; edge-triggered onto one fixed step like Boost.
+    func activateShot() {
+        session.activateHomeSkill(.shot)
     }
 
     // Joystick vector goes straight to the session (not through @Published) so dragging
@@ -292,7 +299,10 @@ struct MatchView: View {
                 onMove: { controller.setMoveVector($0) },
                 boostPhase: controller.hud.boostPhase,
                 boostRemainingSeconds: controller.hud.boostRemainingSeconds,
-                onBoost: { controller.activateBoost() }
+                onBoost: { controller.activateBoost() },
+                shotPhase: controller.hud.shotPhase,
+                shotRemainingSeconds: controller.hud.shotRemainingSeconds,
+                onShot: { controller.activateShot() }
             )
         }
     }
@@ -348,6 +358,9 @@ private struct BottomControls: View {
     let boostPhase: SkillPhase
     let boostRemainingSeconds: Int
     let onBoost: () -> Void
+    let shotPhase: SkillPhase
+    let shotRemainingSeconds: Int
+    let onShot: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
@@ -362,7 +375,11 @@ private struct BottomControls: View {
 
             HStack(spacing: 6) {
                 LockedSkillButton(name: "ブロック", identifier: "skill-block-button")
-                LockedSkillButton(name: "ショット", identifier: "skill-shot-button")
+                ShotSkillButton(
+                    phase: shotPhase,
+                    remainingSeconds: shotRemainingSeconds,
+                    onShot: onShot
+                )
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -485,7 +502,59 @@ private struct BoostSkillButton: View {
     }
 }
 
-// A locked "準備中" skill placeholder (Block / Shot). Disabled, no game rule attached.
+// The live Shot skill button. Enabled while ready; shows armed / cooldown state. Like
+// Boost, the action is gated to the ready phase (so a cooldown tap is a clear no-op)
+// rather than .disabled, which would grey out the armed / cooldown look.
+private struct ShotSkillButton: View {
+    let phase: SkillPhase
+    let remainingSeconds: Int
+    let onShot: () -> Void
+
+    var body: some View {
+        Button(action: { if phase == .ready { onShot() } }) {
+            SkillSlotFace(
+                systemImage: style.icon,
+                iconColor: style.iconColor,
+                fill: style.fill,
+                stroke: style.stroke,
+                strokeWidth: style.strokeWidth,
+                label: style.label,
+                labelColor: style.labelColor
+            )
+            .scaleEffect(phase == .active ? 1.06 : 1.0)
+            .animation(.snappy(duration: 0.15), value: phase)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("skill-shot-button")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    // Per-phase look in the attacking (away) colour: ready invites a shot, active reads as
+    // "aiming" (構え), and cooldown shows a recharging hourglass rather than a locked slot.
+    private var style: (icon: String, iconColor: Color, fill: Color, stroke: Color, strokeWidth: CGFloat, label: String, labelColor: Color) {
+        switch phase {
+        case .ready:
+            return ("bolt.horizontal.fill", .white, Palette.away.opacity(0.22), Palette.away.opacity(0.95), 2, "ショット", .white.opacity(0.95))
+        case .active:
+            return ("scope", .white, Palette.away.opacity(0.95), .white.opacity(0.95), 3, "構え", .white)
+        case .cooldown:
+            return ("hourglass", Palette.accent.opacity(0.85), .white.opacity(0.06), Palette.accent.opacity(0.5), 2, "CD \(remainingSeconds)", Palette.accent.opacity(0.9))
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch phase {
+        case .ready:
+            return "使用可能"
+        case .active:
+            return "構え"
+        case .cooldown:
+            return "クールダウン \(remainingSeconds)秒"
+        }
+    }
+}
+
+// A locked "準備中" skill placeholder (Block). Disabled, no game rule attached.
 private struct LockedSkillButton: View {
     let name: String
     let identifier: String

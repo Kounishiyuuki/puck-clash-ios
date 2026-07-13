@@ -111,7 +111,7 @@ final class PuckClashUITests: XCTestCase {
     }
 
     @MainActor
-    func testBoostButtonIsUsableInMatchAndOtherSkillsLocked() throws {
+    func testBoostAndShotUsableInMatchAndBlockLocked() throws {
         let app = XCUIApplication()
         app.launch()
 
@@ -124,16 +124,18 @@ final class PuckClashUITests: XCTestCase {
         XCTAssertTrue(classicMap.waitForExistence(timeout: 5))
         classicMap.tap()
 
-        // Boost is enabled and tappable; Block / Shot remain locked (disabled).
+        // Boost and Shot are enabled and tappable; only Block remains locked (disabled).
         let boost = app.buttons["skill-boost-button"]
         XCTAssertTrue(boost.waitForExistence(timeout: 5))
         XCTAssertTrue(boost.isEnabled)
+        let shot = app.buttons["skill-shot-button"]
+        XCTAssertTrue(shot.exists)
+        XCTAssertTrue(shot.isEnabled)
         XCTAssertTrue(app.buttons["skill-block-button"].exists)
         XCTAssertFalse(app.buttons["skill-block-button"].isEnabled)
-        XCTAssertTrue(app.buttons["skill-shot-button"].exists)
-        XCTAssertFalse(app.buttons["skill-shot-button"].isEnabled)
 
         boost.tap()
+        shot.tap()
 
         // The match keeps running: the joystick is still present after activating.
         XCTAssertTrue(app.otherElements["joystick-control"].exists)

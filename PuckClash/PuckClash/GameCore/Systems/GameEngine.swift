@@ -33,6 +33,12 @@ struct GameEngine {
         state.homeBoost = boostActivated(state.homeBoost, requested: homeInput?.activatedSkills.contains(.boost) ?? false)
         state.awayBoost = boostActivated(state.awayBoost, requested: awayInput.activatedSkills.contains(.boost))
 
+        // Shot activation (also edge-triggered by the session): a ready shot becomes armed
+        // (active); a request while armed or on cooldown is ignored. The away side keeps a
+        // symmetric shot state but has no activation path yet, so this stays a no-op for it.
+        state.homeShot = shotActivated(state.homeShot, requested: homeInput?.activatedSkills.contains(.shot) ?? false)
+        state.awayShot = shotActivated(state.awayShot, requested: awayInput.activatedSkills.contains(.shot))
+
         state.homePlayer = movedStriker(
             state.homePlayer,
             moveVector: homeInput?.moveVector,
@@ -48,14 +54,19 @@ struct GameEngine {
             deltaTime: deltaTime
         )
 
-        resolveStrikerPuckCollision(with: state.homePlayer)
-        resolveStrikerPuckCollision(with: state.awayPlayer)
+        // Pass each side's shot state in and take the (possibly consumed) state back, so
+        // an armed shot amplifies its one hit and is consumed — no inout aliasing with the
+        // puck the collision also mutates.
+        state.homeShot = resolveStrikerPuckCollision(with: state.homePlayer, shot: state.homeShot)
+        state.awayShot = resolveStrikerPuckCollision(with: state.awayPlayer, shot: state.awayShot)
 
         updatePuck(deltaTime: deltaTime)
 
         // Advance skill timers with the same fixed deltaTime so they are deterministic.
         state.homeBoost = boostAdvanced(state.homeBoost, deltaTime: deltaTime)
         state.awayBoost = boostAdvanced(state.awayBoost, deltaTime: deltaTime)
+        state.homeShot = shotAdvanced(state.homeShot, deltaTime: deltaTime)
+        state.awayShot = shotAdvanced(state.awayShot, deltaTime: deltaTime)
     }
 
     // A ready boost with a fresh request starts its active window; otherwise unchanged.
@@ -81,6 +92,32 @@ struct GameEngine {
             updated.activeRemaining = max(0, updated.activeRemaining - deltaTime)
             if updated.activeRemaining == 0 {
                 updated.cooldownRemaining = state.config.boost.cooldown
+            }
+        } else if updated.cooldownRemaining > 0 {
+            updated.cooldownRemaining = max(0, updated.cooldownRemaining - deltaTime)
+        }
+        return updated
+    }
+
+    // A ready shot with a fresh request enters its armed (active) window; otherwise unchanged.
+    private func shotActivated(_ shot: SkillState, requested: Bool) -> SkillState {
+        guard requested, shot.phase == .ready else {
+            return shot
+        }
+        var updated = shot
+        updated.activeRemaining = state.config.shot.activeDuration
+        return updated
+    }
+
+    // Count down the armed window; when it ends without a hit, start the cooldown. A hit
+    // consumes the shot in resolveStrikerPuckCollision (which sets the cooldown directly),
+    // so by the time this runs the armed window is already 0 and only the cooldown ticks.
+    private func shotAdvanced(_ shot: SkillState, deltaTime: TimeInterval) -> SkillState {
+        var updated = shot
+        if updated.activeRemaining > 0 {
+            updated.activeRemaining = max(0, updated.activeRemaining - deltaTime)
+            if updated.activeRemaining == 0 {
+                updated.cooldownRemaining = state.config.shot.cooldown
             }
         } else if updated.cooldownRemaining > 0 {
             updated.cooldownRemaining = max(0, updated.cooldownRemaining - deltaTime)
@@ -143,13 +180,15 @@ struct GameEngine {
     // Elastic circle-circle resolution with the striker treated as infinite mass.
     // Pushes the puck out of overlap and reflects its velocity relative to the
     // striker, so a moving striker imparts speed to the puck.
-    private mutating func resolveStrikerPuckCollision(with striker: PlayerState) {
+    // Returns the striker's shot state, consumed into cooldown if an armed shot actually
+    // landed this call; otherwise it is returned unchanged.
+    private mutating func resolveStrikerPuckCollision(with striker: PlayerState, shot: SkillState) -> SkillState {
         let delta = state.puck.position - striker.position
         let distance = delta.length
         let minDistance = state.config.strikerRadius + state.config.puckRadius
 
         guard distance < minDistance else {
-            return
+            return shot
         }
 
         // Fall back to a fixed normal when centers coincide to avoid NaN.
@@ -161,12 +200,27 @@ struct GameEngine {
         let relativeVelocity = state.puck.velocity - striker.velocity
         let approachSpeed = relativeVelocity.x * normal.x + relativeVelocity.y * normal.y
 
+        // Only a closing contact imparts an impulse. A mere overlap with no approach speed
+        // neither speeds the puck nor consumes an armed shot.
         guard approachSpeed < 0 else {
-            return
+            return shot
         }
 
-        let impulse = -(1 + state.config.strikerHitRestitution) * approachSpeed
+        // An armed shot amplifies this single hit; a normal hit uses multiplier 1 and so
+        // keeps its exact previous behaviour.
+        let shotArmed = shot.phase == .active
+        let multiplier = shotArmed ? state.config.shot.speedMultiplier : 1
+        let impulse = -(1 + state.config.strikerHitRestitution) * approachSpeed * multiplier
         state.puck.velocity = state.puck.velocity + normal * impulse
+
+        guard shotArmed else {
+            return shot
+        }
+        // Consume the armed shot: end the armed window now and start its cooldown.
+        var consumed = shot
+        consumed.activeRemaining = 0
+        consumed.cooldownRemaining = state.config.shot.cooldown
+        return consumed
     }
 
     private mutating func updatePuck(deltaTime: TimeInterval) {
