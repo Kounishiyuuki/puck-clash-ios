@@ -574,6 +574,9 @@ private struct LockedSkillButton: View {
         .buttonStyle(.plain)
         .disabled(true)
         .accessibilityIdentifier(identifier)
+        // Make the not-yet-available state explicit (matches Boost/Shot exposing a value);
+        // the lock icon shows it visually, this announces it without changing the layout.
+        .accessibilityValue("準備中")
     }
 }
 

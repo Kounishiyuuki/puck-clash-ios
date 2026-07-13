@@ -131,8 +131,11 @@ final class PuckClashUITests: XCTestCase {
         let shot = app.buttons["skill-shot-button"]
         XCTAssertTrue(shot.exists)
         XCTAssertTrue(shot.isEnabled)
-        XCTAssertTrue(app.buttons["skill-block-button"].exists)
-        XCTAssertFalse(app.buttons["skill-block-button"].isEnabled)
+        let block = app.buttons["skill-block-button"]
+        XCTAssertTrue(block.exists)
+        XCTAssertFalse(block.isEnabled)
+        // Block announces its not-yet-available state.
+        XCTAssertEqual(block.value as? String, "準備中")
 
         boost.tap()
         shot.tap()
