@@ -341,7 +341,8 @@ private struct MatchHUDBar: View {
     }
 }
 
-// Bottom control zone: joystick on the left, skill buttons on the right.
+// Bottom control zone: joystick centered, with Boost on the left and the locked
+// Block / Shot skills on the right so the movement stick sits under either thumb.
 private struct BottomControls: View {
     let onMove: (Vector2) -> Void
     let boostPhase: SkillPhase
@@ -349,16 +350,23 @@ private struct BottomControls: View {
     let onBoost: () -> Void
 
     var body: some View {
-        HStack(alignment: .center) {
-            JoystickView(onMove: onMove)
-            Spacer()
-            SkillSlots(
-                boostPhase: boostPhase,
-                boostRemainingSeconds: boostRemainingSeconds,
+        HStack(alignment: .center, spacing: 6) {
+            BoostSkillButton(
+                phase: boostPhase,
+                remainingSeconds: boostRemainingSeconds,
                 onBoost: onBoost
             )
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            JoystickView(onMove: onMove)
+
+            HStack(spacing: 6) {
+                LockedSkillButton(name: "ブロック", identifier: "skill-block-button")
+                LockedSkillButton(name: "ショット", identifier: "skill-shot-button")
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .padding(.horizontal, 22)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 }
@@ -369,8 +377,10 @@ private struct JoystickView: View {
     let onMove: (Vector2) -> Void
     @State private var knobOffset: CGSize = .zero
 
-    private let radius: CGFloat = 64
-    private let knobSize: CGFloat = 58
+    // Larger control + hit area for easier dragging; the produced 0...1 vector (and
+    // therefore GameCore movement) is unchanged since the gesture math is radius-relative.
+    private let radius: CGFloat = 80
+    private let knobSize: CGFloat = 74
     // Ignore tiny thumb jitter, then ease the low end so small tilts still respond.
     private let deadZone: Double = 0.12
 
@@ -423,70 +433,95 @@ private struct JoystickView: View {
     }
 }
 
-// Skill buttons. Boost is live (enabled while ready, showing active / cooldown state);
-// Block and Shot stay locked "準備中" placeholders with no game rule attached.
-private struct SkillSlots: View {
-    let boostPhase: SkillPhase
-    let boostRemainingSeconds: Int
+// The live Boost skill button. Enabled while ready; shows active / cooldown state.
+// The action is gated to the ready phase (so a cooldown tap is a clear no-op) rather
+// than .disabled, which would grey out the active / cooldown look.
+private struct BoostSkillButton: View {
+    let phase: SkillPhase
+    let remainingSeconds: Int
     let onBoost: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: onBoost) {
-                slot(
-                    systemImage: boostPhase == .cooldown ? "hourglass" : "bolt.fill",
-                    iconColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5),
-                    fill: boostPhase == .active ? Palette.home.opacity(0.85) : .white.opacity(0.05),
-                    stroke: boostPhase == .ready ? Palette.home.opacity(0.9) : .white.opacity(0.2),
-                    label: boostLabel,
-                    labelColor: .white.opacity(boostPhase == .ready ? 0.9 : 0.5)
-                )
-            }
-            .disabled(boostPhase != .ready)
-            .accessibilityIdentifier("skill-boost-button")
+        Button(action: { if phase == .ready { onBoost() } }) {
+            SkillSlotFace(
+                systemImage: style.icon,
+                iconColor: style.iconColor,
+                fill: style.fill,
+                stroke: style.stroke,
+                strokeWidth: style.strokeWidth,
+                label: style.label,
+                labelColor: style.labelColor
+            )
+            .scaleEffect(phase == .active ? 1.06 : 1.0)
+            .animation(.snappy(duration: 0.15), value: phase)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("skill-boost-button")
+        .accessibilityValue(accessibilityValue)
+    }
 
-            lockedSlot(name: "ブロック", identifier: "skill-block-button")
-            lockedSlot(name: "ショット", identifier: "skill-shot-button")
+    // Per-phase look: ready is inviting, active is bright, and cooldown reads as
+    // "recharging" (accent tint + hourglass) rather than a dead / permanently locked slot.
+    private var style: (icon: String, iconColor: Color, fill: Color, stroke: Color, strokeWidth: CGFloat, label: String, labelColor: Color) {
+        switch phase {
+        case .ready:
+            return ("bolt.fill", .white, Palette.home.opacity(0.22), Palette.home.opacity(0.95), 2, "ブースト", .white.opacity(0.95))
+        case .active:
+            return ("bolt.fill", .white, Palette.home.opacity(0.95), .white.opacity(0.95), 3, "発動中", .white)
+        case .cooldown:
+            return ("hourglass", Palette.accent.opacity(0.85), .white.opacity(0.06), Palette.accent.opacity(0.5), 2, "CD \(remainingSeconds)", Palette.accent.opacity(0.9))
         }
     }
 
-    private var boostLabel: String {
-        switch boostPhase {
+    private var accessibilityValue: String {
+        switch phase {
         case .ready:
-            return "ブースト"
+            return "使用可能"
         case .active:
             return "発動中"
         case .cooldown:
-            return "CD \(boostRemainingSeconds)"
+            return "クールダウン \(remainingSeconds)秒"
         }
     }
+}
 
-    private func lockedSlot(name: String, identifier: String) -> some View {
+// A locked "準備中" skill placeholder (Block / Shot). Disabled, no game rule attached.
+private struct LockedSkillButton: View {
+    let name: String
+    let identifier: String
+
+    var body: some View {
         Button(action: {}) {
-            slot(
+            SkillSlotFace(
                 systemImage: "lock.fill",
                 iconColor: .white.opacity(0.3),
                 fill: .white.opacity(0.05),
                 stroke: .white.opacity(0.18),
+                strokeWidth: 2,
                 label: name,
                 labelColor: .white.opacity(0.45)
             )
         }
+        .buttonStyle(.plain)
         .disabled(true)
         .accessibilityIdentifier(identifier)
     }
+}
 
-    private func slot(
-        systemImage: String,
-        iconColor: Color,
-        fill: Color,
-        stroke: Color,
-        label: String,
-        labelColor: Color
-    ) -> some View {
+// Shared circular face for a skill button (icon + label).
+private struct SkillSlotFace: View {
+    let systemImage: String
+    let iconColor: Color
+    let fill: Color
+    let stroke: Color
+    let strokeWidth: CGFloat
+    let label: String
+    let labelColor: Color
+
+    var body: some View {
         VStack(spacing: 4) {
             Circle()
-                .strokeBorder(stroke, lineWidth: 2)
+                .strokeBorder(stroke, lineWidth: strokeWidth)
                 .background(Circle().fill(fill))
                 .frame(width: 46, height: 46)
                 .overlay(

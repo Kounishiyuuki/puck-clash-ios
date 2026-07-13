@@ -170,7 +170,7 @@ struct MatchConfig: Equatable {
         rinkSize: Vector2(x: 500, y: 640),
         matchDuration: 180,
         strikerMaxSpeed: 700,
-        goalMouthHalfWidth: 133,
+        goalMouthHalfWidth: 118,
         strikerRadius: 30,
         puckRadius: 16,
         strikerHitRestitution: 0.75,

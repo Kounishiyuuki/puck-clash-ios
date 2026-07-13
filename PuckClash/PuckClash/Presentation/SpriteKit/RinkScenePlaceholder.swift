@@ -12,6 +12,7 @@ final class RinkScene: SKScene {
     private var lastHUD: MatchHUD?
     private var lastScore: ScoreState?
     private var lastPuckSpeed: Double = 0
+    private var lastBoostPhase: SkillPhase = .ready
     private var lastUpdateTime: TimeInterval?
 
     private let rinkNode = SKShapeNode()
@@ -25,6 +26,7 @@ final class RinkScene: SKScene {
     private let puckShadowNode = SKShapeNode()
     private let homeStrikerNode = SKShapeNode()
     private let homeStrikerInnerNode = SKShapeNode()
+    private let homeBoostRingNode = SKShapeNode()
     private let awayStrikerNode = SKShapeNode()
     private let awayStrikerInnerNode = SKShapeNode()
     private let puckNode = SKShapeNode()
@@ -137,6 +139,22 @@ final class RinkScene: SKScene {
             )
         }
         lastPuckSpeed = speed
+
+        // Boost feedback on the home striker: a ring while active, a pulse when it
+        // starts. Driven entirely by observed phase transitions, no rule state here.
+        let boostPhase = state.homeBoost.phase
+        if boostPhase == .active, lastBoostPhase != .active {
+            homeStrikerNode.run(
+                .sequence([.scale(to: 1.18, duration: 0.08), .scale(to: 1.0, duration: 0.14)]),
+                withKey: "boostPulse"
+            )
+            homeBoostRingNode.removeAction(forKey: "boostRing")
+            homeBoostRingNode.run(.fadeAlpha(to: 0.9, duration: 0.12), withKey: "boostRing")
+        } else if boostPhase != .active, lastBoostPhase == .active {
+            homeBoostRingNode.removeAction(forKey: "boostRing")
+            homeBoostRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "boostRing")
+        }
+        lastBoostPhase = boostPhase
     }
 
     private func flash(_ node: SKShapeNode) {
@@ -186,6 +204,13 @@ final class RinkScene: SKScene {
 
         configureStriker(homeStrikerNode, inner: homeStrikerInnerNode, color: homeColor)
         configureStriker(awayStrikerNode, inner: awayStrikerInnerNode, color: awayColor)
+
+        // Hidden until Boost is active; a glowing ring around the home striker.
+        homeBoostRingNode.strokeColor = homeColor
+        homeBoostRingNode.lineWidth = 3
+        homeBoostRingNode.fillColor = .clear
+        homeBoostRingNode.alpha = 0
+        homeStrikerNode.addChild(homeBoostRingNode)
 
         puckNode.fillColor = SKColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         puckNode.strokeColor = SKColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
@@ -264,6 +289,7 @@ final class RinkScene: SKScene {
 
         homeStrikerNode.path = discPath(radius: strikerRadius)
         homeStrikerInnerNode.path = discPath(radius: strikerRadius * 0.55)
+        homeBoostRingNode.path = discPath(radius: strikerRadius * 1.35)
         homeStrikerNode.position = scenePoint(for: state.homePlayer.position, config: config, rinkFrame: frame)
 
         awayStrikerNode.path = discPath(radius: strikerRadius)
