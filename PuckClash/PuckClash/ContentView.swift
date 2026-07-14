@@ -31,6 +31,8 @@ struct MatchHUD: Equatable {
     var boostRemainingSeconds = 0
     var shotPhase: SkillPhase = .ready
     var shotRemainingSeconds = 0
+    var blockPhase: SkillPhase = .ready
+    var blockRemainingSeconds = 0
 }
 
 // Owns the match: a LocalMatchSession (the simulation) and the RinkScene that renders
@@ -59,6 +61,11 @@ final class MatchController: ObservableObject {
     // Fire the local player's Shot skill; edge-triggered onto one fixed step like Boost.
     func activateShot() {
         session.activateHomeSkill(.shot)
+    }
+
+    // Fire the local player's Block skill; edge-triggered onto one fixed step like Boost.
+    func activateBlock() {
+        session.activateHomeSkill(.block)
     }
 
     // Joystick vector goes straight to the session (not through @Published) so dragging
@@ -302,7 +309,10 @@ struct MatchView: View {
                 onBoost: { controller.activateBoost() },
                 shotPhase: controller.hud.shotPhase,
                 shotRemainingSeconds: controller.hud.shotRemainingSeconds,
-                onShot: { controller.activateShot() }
+                onShot: { controller.activateShot() },
+                blockPhase: controller.hud.blockPhase,
+                blockRemainingSeconds: controller.hud.blockRemainingSeconds,
+                onBlock: { controller.activateBlock() }
             )
         }
     }
@@ -351,8 +361,8 @@ private struct MatchHUDBar: View {
     }
 }
 
-// Bottom control zone: joystick centered, with Boost on the left and the locked
-// Block / Shot skills on the right so the movement stick sits under either thumb.
+// Bottom control zone: joystick centered, with Boost on the left and the Block / Shot
+// skills on the right so the movement stick sits under either thumb.
 private struct BottomControls: View {
     let onMove: (Vector2) -> Void
     let boostPhase: SkillPhase
@@ -361,6 +371,9 @@ private struct BottomControls: View {
     let shotPhase: SkillPhase
     let shotRemainingSeconds: Int
     let onShot: () -> Void
+    let blockPhase: SkillPhase
+    let blockRemainingSeconds: Int
+    let onBlock: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: 6) {
@@ -374,7 +387,11 @@ private struct BottomControls: View {
             JoystickView(onMove: onMove)
 
             HStack(spacing: 6) {
-                LockedSkillButton(name: "ブロック", identifier: "skill-block-button")
+                BlockSkillButton(
+                    phase: blockPhase,
+                    remainingSeconds: blockRemainingSeconds,
+                    onBlock: onBlock
+                )
                 ShotSkillButton(
                     phase: shotPhase,
                     remainingSeconds: shotRemainingSeconds,
@@ -554,29 +571,55 @@ private struct ShotSkillButton: View {
     }
 }
 
-// A locked "準備中" skill placeholder (Block). Disabled, no game rule attached.
-private struct LockedSkillButton: View {
-    let name: String
-    let identifier: String
+// The live Block skill button. Enabled while ready; shows defending / cooldown state. Like
+// Boost/Shot, the action is gated to the ready phase (so a cooldown tap is a clear no-op)
+// rather than .disabled, which would grey out the active / cooldown look.
+private struct BlockSkillButton: View {
+    let phase: SkillPhase
+    let remainingSeconds: Int
+    let onBlock: () -> Void
 
     var body: some View {
-        Button(action: {}) {
+        Button(action: { if phase == .ready { onBlock() } }) {
             SkillSlotFace(
-                systemImage: "lock.fill",
-                iconColor: .white.opacity(0.3),
-                fill: .white.opacity(0.05),
-                stroke: .white.opacity(0.18),
-                strokeWidth: 2,
-                label: name,
-                labelColor: .white.opacity(0.45)
+                systemImage: style.icon,
+                iconColor: style.iconColor,
+                fill: style.fill,
+                stroke: style.stroke,
+                strokeWidth: style.strokeWidth,
+                label: style.label,
+                labelColor: style.labelColor
             )
+            .scaleEffect(phase == .active ? 1.06 : 1.0)
+            .animation(.snappy(duration: 0.15), value: phase)
         }
         .buttonStyle(.plain)
-        .disabled(true)
-        .accessibilityIdentifier(identifier)
-        // Make the not-yet-available state explicit (matches Boost/Shot exposing a value);
-        // the lock icon shows it visually, this announces it without changing the layout.
-        .accessibilityValue("準備中")
+        .accessibilityIdentifier("skill-block-button")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    // Per-phase look in the defending (home) colour: ready invites a block, active reads as
+    // "defending" (防御中), and cooldown shows a recharging hourglass.
+    private var style: (icon: String, iconColor: Color, fill: Color, stroke: Color, strokeWidth: CGFloat, label: String, labelColor: Color) {
+        switch phase {
+        case .ready:
+            return ("shield.fill", .white, Palette.home.opacity(0.22), Palette.home.opacity(0.95), 2, "ブロック", .white.opacity(0.95))
+        case .active:
+            return ("shield.fill", .white, Palette.home.opacity(0.95), .white.opacity(0.95), 3, "防御中", .white)
+        case .cooldown:
+            return ("hourglass", Palette.accent.opacity(0.85), .white.opacity(0.06), Palette.accent.opacity(0.5), 2, "CD \(remainingSeconds)", Palette.accent.opacity(0.9))
+        }
+    }
+
+    private var accessibilityValue: String {
+        switch phase {
+        case .ready:
+            return "使用可能"
+        case .active:
+            return "防御中"
+        case .cooldown:
+            return "クールダウン \(remainingSeconds)秒"
+        }
     }
 }
 

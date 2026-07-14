@@ -1126,15 +1126,176 @@ struct PuckClashTests {
         #expect(abs(snapshot.state.homeShot.activeRemaining - expected) < 1e-9)
     }
 
-    @Test func blockActivationHasNoEffect() {
+    @Test func blockActivationDoesNotAffectBoostOrShot() {
         var engine = GameEngine(state: .initial(config: config))
-        // Block is not implemented: requesting it changes no skill state and movement is
-        // at normal speed.
+        // Activating Block raises its own shield without touching Boost or Shot.
         engine.update(
             deltaTime: 0.5,
             inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.block])]
         )
+        #expect(engine.state.homeBlock.phase == .active)
         #expect(engine.state.homeBoost.phase == .ready)
         #expect(engine.state.homeShot.phase == .ready)
+    }
+
+    // MARK: - Block skill
+
+    @Test func blockActivationActivatesShield() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+        #expect(engine.state.homeBlock.phase == .active)
+        #expect(engine.state.homeBlock.activeRemaining > 0)
+    }
+
+    @Test func blockDurationEntersCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 0.5, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+        #expect(engine.state.homeBlock.phase == .active)
+        engine.update(deltaTime: config.block.duration, inputs: [])
+        #expect(engine.state.homeBlock.phase == .cooldown)
+    }
+
+    @Test func blockCannotReactivateDuringCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(
+            deltaTime: config.block.duration + 0.5,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])]
+        )
+        #expect(engine.state.homeBlock.phase == .cooldown)
+        let before = engine.state.homeBlock.cooldownRemaining
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+        #expect(engine.state.homeBlock.phase == .cooldown)
+        #expect(engine.state.homeBlock.cooldownRemaining < before)
+    }
+
+    @Test func blockReactivatesAfterCooldown() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(
+            deltaTime: config.block.duration,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])]
+        )
+        engine.update(deltaTime: config.block.cooldown, inputs: [])
+        #expect(engine.state.homeBlock.phase == .ready)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+        #expect(engine.state.homeBlock.phase == .active)
+    }
+
+    @Test func blockDoesNotActivateAfterMatchEnds() {
+        var engine = GameEngine(state: .initial(config: config))
+        engine.update(deltaTime: 12, inputs: []) // matchDuration is 10 -> finished
+        #expect(engine.state.phase == .finished)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+        #expect(engine.state.homeBlock.phase == .ready)
+    }
+
+    @Test func activeBlockReflectsPuckBeforeBottomGoal() {
+        // Puck heading down through the goal mouth; shield line is offsetFromGoal
+        // (puckRadius * 4 = 20) spanning the mouth [30, 70].
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 25)
+        state.puck.velocity = Vector2(x: 0, y: -600)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+
+        #expect(engine.state.homeBlock.phase == .active)
+        #expect(engine.state.puck.velocity.y > 0) // reflected upward
+        #expect(engine.state.score.away == 0) // no goal
+    }
+
+    @Test func withoutBlockSamePuckScoresAtBottom() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 25)
+        state.puck.velocity = Vector2(x: 0, y: -600)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: []) // no Block
+
+        #expect(engine.state.score.away == 1)
+    }
+
+    @Test func blockDoesNotReflectPuckOutsideMouth() {
+        // x well outside the goal mouth / shield span: Block must not catch it; the puck
+        // passes the shield line and bounces off the bottom wall instead (ends below 20).
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 10, y: 25)
+        state.puck.velocity = Vector2(x: 0, y: -600)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+
+        #expect(engine.state.homeBlock.phase == .active)
+        #expect(engine.state.puck.position.y < 20)
+    }
+
+    @Test func homeBlockDoesNotReflectUpwardPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 15)
+        state.puck.velocity = Vector2(x: 0, y: 300)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+
+        // An upward puck passes the home shield untouched.
+        #expect(engine.state.puck.velocity.y > 0)
+        #expect(engine.state.puck.position.y > 15)
+    }
+
+    @Test func homeBlockDoesNotBlockHomeScoringAtTop() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 190)
+        state.puck.velocity = Vector2(x: 0, y: 600)
+        var engine = GameEngine(state: state)
+
+        // Park the away striker out of the puck's path so it does not intercept.
+        engine.update(
+            deltaTime: 0.05,
+            inputs: [
+                PlayerInput(playerId: .home, activatedSkills: [.block]),
+                PlayerInput(playerId: .away, targetPosition: Vector2(x: 10, y: 160), timestamp: 1)
+            ]
+        )
+
+        #expect(engine.state.score.home == 1)
+    }
+
+    @Test func activeBlockReflectsHighSpeedPuck() {
+        // A Shot-speed puck that would tunnel a naive thin-bar check: the crossing test
+        // still catches it at the shield line.
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 22)
+        state.puck.velocity = Vector2(x: 0, y: -3000)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [PlayerInput(playerId: .home, activatedSkills: [.block])])
+
+        #expect(engine.state.puck.velocity.y > 0)
+        #expect(engine.state.score.away == 0)
+    }
+
+    @Test func localSessionActivatesBlockOnNextAdvance() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.block)
+        let snapshot = session.advance(deltaTime: fixedDelta)
+
+        #expect(snapshot.state.homeBlock.phase == .active)
+        #expect(snapshot.state.homeBlock.activeRemaining > 0)
+    }
+
+    @Test func localSessionBlockFiresOnceAcrossCatchUp() {
+        let session = LocalMatchSession(config: config)
+        let fixedDelta = 1.0 / config.tickRate
+
+        session.activateHomeSkill(.block)
+        let snapshot = session.advance(deltaTime: fixedDelta * 4)
+
+        #expect(snapshot.state.homeBlock.phase == .active)
+        let expected = config.block.duration - 4 * fixedDelta
+        #expect(abs(snapshot.state.homeBlock.activeRemaining - expected) < 1e-9)
     }
 }

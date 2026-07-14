@@ -39,6 +39,12 @@ struct GameEngine {
         state.homeShot = shotActivated(state.homeShot, requested: homeInput?.activatedSkills.contains(.shot) ?? false)
         state.awayShot = shotActivated(state.awayShot, requested: awayInput.activatedSkills.contains(.shot))
 
+        // Block activation (edge-triggered by the session): a ready block raises its shield
+        // (active); a request while active or on cooldown is ignored. The away side keeps a
+        // symmetric block state but has no activation path yet, so this stays a no-op for it.
+        state.homeBlock = blockActivated(state.homeBlock, requested: homeInput?.activatedSkills.contains(.block) ?? false)
+        state.awayBlock = blockActivated(state.awayBlock, requested: awayInput.activatedSkills.contains(.block))
+
         state.homePlayer = movedStriker(
             state.homePlayer,
             moveVector: homeInput?.moveVector,
@@ -67,6 +73,8 @@ struct GameEngine {
         state.awayBoost = boostAdvanced(state.awayBoost, deltaTime: deltaTime)
         state.homeShot = shotAdvanced(state.homeShot, deltaTime: deltaTime)
         state.awayShot = shotAdvanced(state.awayShot, deltaTime: deltaTime)
+        state.homeBlock = blockAdvanced(state.homeBlock, deltaTime: deltaTime)
+        state.awayBlock = blockAdvanced(state.awayBlock, deltaTime: deltaTime)
     }
 
     // A ready boost with a fresh request starts its active window; otherwise unchanged.
@@ -118,6 +126,31 @@ struct GameEngine {
             updated.activeRemaining = max(0, updated.activeRemaining - deltaTime)
             if updated.activeRemaining == 0 {
                 updated.cooldownRemaining = state.config.shot.cooldown
+            }
+        } else if updated.cooldownRemaining > 0 {
+            updated.cooldownRemaining = max(0, updated.cooldownRemaining - deltaTime)
+        }
+        return updated
+    }
+
+    // A ready block with a fresh request raises its shield (active window); otherwise unchanged.
+    private func blockActivated(_ block: SkillState, requested: Bool) -> SkillState {
+        guard requested, block.phase == .ready else {
+            return block
+        }
+        var updated = block
+        updated.activeRemaining = state.config.block.duration
+        return updated
+    }
+
+    // Count down the shield window, then (once it ends) the cooldown, back to ready. Block
+    // is not consumed on a hit, so this is the same timer shape as Boost.
+    private func blockAdvanced(_ block: SkillState, deltaTime: TimeInterval) -> SkillState {
+        var updated = block
+        if updated.activeRemaining > 0 {
+            updated.activeRemaining = max(0, updated.activeRemaining - deltaTime)
+            if updated.activeRemaining == 0 {
+                updated.cooldownRemaining = state.config.block.cooldown
             }
         } else if updated.cooldownRemaining > 0 {
             updated.cooldownRemaining = max(0, updated.cooldownRemaining - deltaTime)
@@ -226,6 +259,13 @@ struct GameEngine {
     private mutating func updatePuck(deltaTime: TimeInterval) {
         let nextPosition = state.puck.position + state.puck.velocity * deltaTime
 
+        // Defensive shields are resolved before scoring: a puck that hits an active Block
+        // is reflected and must not also score or bounce off a wall this step.
+        if reflectPuckOffActiveShield(nextPosition: nextPosition) {
+            dampPuckVelocity(deltaTime: deltaTime)
+            return
+        }
+
         if nextPosition.y >= state.config.topGoalBoundaryY && isInsideGoalMouth(nextPosition) {
             scoreGoal(for: .home)
             return
@@ -238,6 +278,51 @@ struct GameEngine {
 
         reflectPuckOffWalls(nextPosition: nextPosition)
         dampPuckVelocity(deltaTime: deltaTime)
+    }
+
+    // While a side's Block is active, a horizontal shield in front of its goal reflects the
+    // puck. Uses a crossing test (position -> nextPosition straddles the shield line) with x
+    // interpolation, so a fast puck (e.g. after a Shot) cannot tunnel through in one step.
+    // Home defends the bottom goal (y = 0), away the top (y = rinkSize.y). The shield spans
+    // the goal mouth. Not consumed on a hit; the block timer is advanced in update().
+    // Returns whether a reflection happened this step.
+    private mutating func reflectPuckOffActiveShield(nextPosition: Vector2) -> Bool {
+        let current = state.puck.position
+        let velocity = state.puck.velocity
+        let offset = state.config.block.offsetFromGoal ?? state.config.puckRadius * 4
+        let halfWidth = state.config.goalMouthHalfWidth
+        let centerX = state.config.rinkCenter.x
+        let restitution = state.config.block.restitution
+
+        // Home shield: bottom goal, puck moving down, crossing the shield line from above.
+        if state.homeBlock.phase == .active, velocity.y < 0 {
+            let lineY = offset
+            if current.y > lineY, nextPosition.y <= lineY {
+                let t = (current.y - lineY) / (current.y - nextPosition.y)
+                let xCross = current.x + t * (nextPosition.x - current.x)
+                if abs(xCross - centerX) <= halfWidth {
+                    state.puck.position = Vector2(x: xCross, y: lineY)
+                    state.puck.velocity = Vector2(x: velocity.x, y: abs(velocity.y) * restitution)
+                    return true
+                }
+            }
+        }
+
+        // Away shield: top goal, puck moving up, crossing the shield line from below.
+        if state.awayBlock.phase == .active, velocity.y > 0 {
+            let lineY = state.config.rinkSize.y - offset
+            if current.y < lineY, nextPosition.y >= lineY {
+                let t = (lineY - current.y) / (nextPosition.y - current.y)
+                let xCross = current.x + t * (nextPosition.x - current.x)
+                if abs(xCross - centerX) <= halfWidth {
+                    state.puck.position = Vector2(x: xCross, y: lineY)
+                    state.puck.velocity = Vector2(x: velocity.x, y: -abs(velocity.y) * restitution)
+                    return true
+                }
+            }
+        }
+
+        return false
     }
 
     private func isInsideGoalMouth(_ position: Vector2) -> Bool {
