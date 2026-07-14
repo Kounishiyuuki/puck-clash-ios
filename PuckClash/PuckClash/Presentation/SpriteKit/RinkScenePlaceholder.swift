@@ -14,6 +14,7 @@ final class RinkScene: SKScene {
     private var lastPuckSpeed: Double = 0
     private var lastBoostPhase: SkillPhase = .ready
     private var lastShotPhase: SkillPhase = .ready
+    private var lastHomeBlockPhase: SkillPhase = .ready
     private var lastUpdateTime: TimeInterval?
 
     private let rinkNode = SKShapeNode()
@@ -33,6 +34,7 @@ final class RinkScene: SKScene {
     private let awayStrikerInnerNode = SKShapeNode()
     private let puckNode = SKShapeNode()
     private let puckHighlightNode = SKShapeNode()
+    private let homeBlockShieldNode = SKShapeNode()
 
     private let homeColor = SKColor(red: 0.16, green: 0.52, blue: 1.0, alpha: 1)
     private let awayColor = SKColor(red: 0.95, green: 0.28, blue: 0.34, alpha: 1)
@@ -117,6 +119,18 @@ final class RinkScene: SKScene {
             shotRemainingSeconds = 0
         }
 
+        // Same coarse whole-second derivation for the Block button.
+        let block = state.homeBlock
+        let blockRemainingSeconds: Int
+        switch block.phase {
+        case .active:
+            blockRemainingSeconds = Int(block.activeRemaining.rounded(.up))
+        case .cooldown:
+            blockRemainingSeconds = Int(block.cooldownRemaining.rounded(.up))
+        case .ready:
+            blockRemainingSeconds = 0
+        }
+
         let snapshot = MatchHUD(
             homeScore: state.score.home,
             awayScore: state.score.away,
@@ -124,7 +138,9 @@ final class RinkScene: SKScene {
             boostPhase: boost.phase,
             boostRemainingSeconds: boostRemainingSeconds,
             shotPhase: shot.phase,
-            shotRemainingSeconds: shotRemainingSeconds
+            shotRemainingSeconds: shotRemainingSeconds,
+            blockPhase: block.phase,
+            blockRemainingSeconds: blockRemainingSeconds
         )
         if force || snapshot != lastHUD {
             lastHUD = snapshot
@@ -184,6 +200,18 @@ final class RinkScene: SKScene {
             homeShotRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "shotRing")
         }
         lastShotPhase = shotPhase
+
+        // Block feedback: the home goal shield is shown while defending and faded out when
+        // it ends. Its own node/key keeps it independent of the boost/shot rings.
+        let homeBlockPhase = state.homeBlock.phase
+        if homeBlockPhase == .active, lastHomeBlockPhase != .active {
+            homeBlockShieldNode.removeAction(forKey: "blockShield")
+            homeBlockShieldNode.run(.fadeAlpha(to: 0.85, duration: 0.12), withKey: "blockShield")
+        } else if homeBlockPhase != .active, lastHomeBlockPhase == .active {
+            homeBlockShieldNode.removeAction(forKey: "blockShield")
+            homeBlockShieldNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "blockShield")
+        }
+        lastHomeBlockPhase = homeBlockPhase
     }
 
     private func flash(_ node: SKShapeNode) {
@@ -248,6 +276,13 @@ final class RinkScene: SKScene {
         homeShotRingNode.fillColor = .clear
         homeShotRingNode.alpha = 0
         homeStrikerNode.addChild(homeShotRingNode)
+
+        // Hidden until Block is active; a home-colour bar in front of the bottom goal.
+        homeBlockShieldNode.strokeColor = homeColor
+        homeBlockShieldNode.lineWidth = 6
+        homeBlockShieldNode.lineCap = .round
+        homeBlockShieldNode.alpha = 0
+        addChild(homeBlockShieldNode)
 
         puckNode.fillColor = SKColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         puckNode.strokeColor = SKColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
@@ -320,6 +355,12 @@ final class RinkScene: SKScene {
             rect: CGRect(x: goalMinX, y: frame.minY, width: goalMaxX - goalMinX, height: areaHeight),
             transform: nil
         )
+
+        // Block shield: a bar across the goal mouth at the home shield line (matches the
+        // engine's offsetFromGoal / goalMouthHalfWidth). Visibility is driven by alpha.
+        let blockOffset = config.block.offsetFromGoal ?? config.puckRadius * 4
+        let shieldY = scenePoint(for: Vector2(x: 0, y: blockOffset), config: config, rinkFrame: frame).y
+        homeBlockShieldNode.path = linePath(from: CGPoint(x: goalMinX, y: shieldY), to: CGPoint(x: goalMaxX, y: shieldY))
 
         let strikerRadius = config.strikerRadius * scale
         let puckRadius = config.puckRadius * scale

@@ -101,6 +101,19 @@ struct ShotConfig: Equatable {
     var cooldown: TimeInterval = 7.0
 }
 
+// Tunable Block skill parameters. Like the others, held by MatchConfig. Block is a
+// duration-type defensive skill (phase == .active means the shield is up): while active a
+// horizontal shield sits in front of the defended goal and reflects the puck; it is not
+// consumed on a hit, so it can save several pucks before its window elapses into cooldown.
+// The shield spans the goal mouth (goalMouthHalfWidth) in x; offsetFromGoal is nil ->
+// derived as puckRadius * 4 by the engine so it scales with the puck.
+struct BlockConfig: Equatable {
+    var duration: TimeInterval = 1.5
+    var cooldown: TimeInterval = 8.0
+    var offsetFromGoal: Double? = nil
+    var restitution: Double = 1.0
+}
+
 // Vertical air-hockey board: home defends the bottom (y = 0) and attacks the top
 // goal (y = rinkSize.y); away is the mirror. Goals are an X-range mouth on the
 // top/bottom edges; the left/right edges are always walls.
@@ -123,6 +136,8 @@ struct MatchConfig: Equatable {
     let boost: BoostConfig
     // Shot skill tuning, agreed by both sides of the match.
     let shot: ShotConfig
+    // Block skill tuning, agreed by both sides of the match.
+    let block: BlockConfig
 
     init(
         rinkSize: Vector2,
@@ -137,7 +152,8 @@ struct MatchConfig: Equatable {
         puckStopSpeed: Double = 0,
         tickRate: Double = 60,
         boost: BoostConfig = BoostConfig(),
-        shot: ShotConfig = ShotConfig()
+        shot: ShotConfig = ShotConfig(),
+        block: BlockConfig = BlockConfig()
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -152,6 +168,7 @@ struct MatchConfig: Equatable {
         self.tickRate = tickRate
         self.boost = boost
         self.shot = shot
+        self.block = block
     }
 
     var rinkCenter: Vector2 {
@@ -268,6 +285,8 @@ struct GameState: Equatable {
     var awayBoost: SkillState
     var homeShot: SkillState
     var awayShot: SkillState
+    var homeBlock: SkillState
+    var awayBlock: SkillState
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
@@ -294,7 +313,9 @@ struct GameState: Equatable {
             homeBoost: .ready,
             awayBoost: .ready,
             homeShot: .ready,
-            awayShot: .ready
+            awayShot: .ready,
+            homeBlock: .ready,
+            awayBlock: .ready
         )
     }
 }
