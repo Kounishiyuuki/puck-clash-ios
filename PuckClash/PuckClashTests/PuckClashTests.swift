@@ -1298,4 +1298,262 @@ struct PuckClashTests {
         let expected = config.block.duration - 4 * fixedDelta
         #expect(abs(snapshot.state.homeBlock.activeRemaining - expected) < 1e-9)
     }
+
+    // MARK: - Away CPU skill decisions
+
+    // With the test config: away shield line y = 200 - puckRadius*4 = 180; goal mouth
+    // x in [30, 70]; Shot contact range = 10 + 5 + 5*1.5 = 22.5; Boost far threshold =
+    // 200 * 0.35 = 70. awaySkillDecisionRemaining starts at 0, so the first CPU-driven
+    // update is a decision tick. deltaTime 0.001 keeps strikers from reaching the puck
+    // within the asserted tick.
+
+    @Test func cpuBlockActivatesAgainstPuckAimedAtTopGoalMouth() {
+        var state = GameState.initial(config: config)
+        state.awayPlayer.position = Vector2(x: 10, y: 190) // out of the puck's path
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // crosses y=180 in 0.15s at x=50 (in mouth)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayBlock.phase == .active)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuBlockDoesNotActivateWhenPredictionMissesGoalMouth() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 10, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // reaches the shield line at x=10, outside [30,70]
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuBlockDoesNotActivateOncePuckIsPastShieldLine() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 185) // already beyond the shield line (180)
+        state.puck.velocity = Vector2(x: 0, y: 200)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuBlockDoesNotActivateForDownwardOrStationaryPuck() {
+        for velocity in [Vector2(x: 0, y: -50), Vector2.zero] {
+            var state = GameState.initial(config: config)
+            state.puck.position = Vector2(x: 50, y: 120) // in the mouth column, but not incoming
+            state.puck.velocity = velocity
+            var engine = GameEngine(state: state)
+
+            engine.update(deltaTime: 0.001, inputs: [])
+
+            #expect(engine.state.awayBlock.phase == .ready)
+            #expect(engine.state.awayShot.phase == .ready)
+            #expect(engine.state.awayBoost.phase == .ready)
+        }
+    }
+
+    @Test func cpuShotActivatesWhenPuckCloseAndBelowStriker() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 140) // distance 20 <= 22.5, striker above
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayShot.phase == .active)
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuShotDoesNotActivateWhenPuckFar() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 100) // distance 60 > 22.5 (and <= 70: no Boost)
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuShotDoesNotActivateWhenStrikerBelowPuck() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 178) // distance 18 <= 22.5 but puck is above
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuBoostActivatesWhenPuckFarFromStriker() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 85) // distance 75 > 70
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayBoost.phase == .active)
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayShot.phase == .ready)
+    }
+
+    @Test func cpuBoostDoesNotActivateWhenPuckNear() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 120) // distance 40 <= 70
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuActivatesOnlyBlockWhenBlockAndShotBothApply() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 150) // Shot: distance 10, striker above
+        state.puck.velocity = Vector2(x: 0, y: 200)  // Block: crosses 180 in 0.15s in the mouth
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        // One decision activates at most one skill, priority Block > Shot > Boost.
+        #expect(engine.state.awayBlock.phase == .active)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuDoesNotRefireSkillOnCooldown() {
+        var state = GameState.initial(config: config)
+        state.awayPlayer.position = Vector2(x: 10, y: 190)
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition holds...
+        state.awayBlock = SkillState(activeRemaining: 0, cooldownRemaining: 5) // ...but it is cooling down
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        // Not re-fired: still on cooldown, timer merely ticking down; no fallback skill fires
+        // because neither the Shot nor Boost condition holds here.
+        #expect(engine.state.awayBlock.phase == .cooldown)
+        #expect(engine.state.awayBlock.cooldownRemaining < 5)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func cpuSkillsDoNotFireAfterMatchEnds() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition would hold
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 12, inputs: []) // matchDuration is 10 -> buzzer, no simulation
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.awaySkillDecisionRemaining == 0) // buzzer frame never ran the CPU
+
+        engine.update(deltaTime: 0.001, inputs: [])
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awayShot.phase == .ready)
+        #expect(engine.state.awayBoost.phase == .ready)
+        #expect(engine.state.awaySkillDecisionRemaining == 0)
+    }
+
+    @Test func cpuDecisionTimerGatesActivation() {
+        var state = GameState.initial(config: config)
+        state.awayPlayer.position = Vector2(x: 10, y: 190)
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition holds throughout
+        state.awaySkillDecisionRemaining = 0.02
+        var engine = GameEngine(state: state)
+
+        // Timer still positive after this tick: no decision, nothing fires.
+        engine.update(deltaTime: 0.01, inputs: [])
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(abs(engine.state.awaySkillDecisionRemaining - 0.01) < 1e-9)
+
+        // Timer reaches zero: the decision runs, Block fires, timer resets to the interval.
+        engine.update(deltaTime: 0.01, inputs: [])
+        #expect(engine.state.awayBlock.phase == .active)
+        #expect(engine.state.awaySkillDecisionRemaining == 0.15)
+    }
+
+    @Test func cpuCatchUpRunsSingleDecision() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 85) // Boost condition (distance 75 > 70)
+        state.puck.velocity = .zero
+        var engine = GameEngine(state: state)
+
+        // One update spanning several decision intervals still evaluates exactly one
+        // decision and resets the timer to one interval — no multi-fire catch-up.
+        engine.update(deltaTime: 0.5, inputs: [])
+
+        #expect(engine.state.awayBoost.phase == .active)
+        #expect(engine.state.awaySkillDecisionRemaining == 0.15)
+        // Home skills are untouched by the CPU decision.
+        #expect(engine.state.homeBoost.phase == .ready)
+        #expect(engine.state.homeShot.phase == .ready)
+        #expect(engine.state.homeBlock.phase == .ready)
+    }
+
+    @Test func explicitAwayInputBypassesCPUSkillDecision() {
+        var state = GameState.initial(config: config)
+        state.awayPlayer.position = Vector2(x: 10, y: 190)
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition would hold for the CPU
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 10, y: 190), timestamp: 1)]
+        )
+
+        // The explicit input replaces the CPU entirely: no skill, and the decision
+        // timer does not advance.
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awaySkillDecisionRemaining == 0)
+    }
+
+    @Test func cpuSkillSimulationIsDeterministic() {
+        // Same initial state + same deltaTime sequence must reproduce the exact same
+        // away skill states and decision timer at every step (GameState equality
+        // includes awaySkillDecisionRemaining).
+        var initial = GameState.initial(config: config)
+        initial.puck.position = Vector2(x: 40, y: 150)
+        initial.puck.velocity = Vector2(x: 20, y: 120)
+        let deltas: [Double] = [0.02, 0.05, 0.10, 0.02, 0.15, 0.05, 0.10, 0.02, 0.10, 0.05]
+
+        func run() -> [GameState] {
+            var engine = GameEngine(state: initial)
+            var states: [GameState] = []
+            for dt in deltas {
+                engine.update(deltaTime: dt, inputs: [])
+                states.append(engine.state)
+            }
+            return states
+        }
+
+        let first = run()
+        let second = run()
+        #expect(first == second)
+
+        // Guard against a vacuous pass: some away skill actually fired during the run.
+        #expect(first.contains {
+            $0.awayBlock.phase != .ready || $0.awayShot.phase != .ready || $0.awayBoost.phase != .ready
+        })
+    }
 }
