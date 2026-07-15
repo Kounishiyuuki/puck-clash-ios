@@ -110,6 +110,7 @@ struct ContentView: View {
     @State private var matchID = UUID()
     @State private var showSettings = false
     @State private var showHowToPlay = false
+    @State private var showSkillGuide = false
 
     var body: some View {
         content
@@ -119,6 +120,9 @@ struct ContentView: View {
             .sheet(isPresented: $showHowToPlay) {
                 HowToPlayView(onClose: { showHowToPlay = false })
             }
+            .sheet(isPresented: $showSkillGuide) {
+                SkillGuideView(onClose: { showSkillGuide = false })
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -127,7 +131,8 @@ struct ContentView: View {
             StartView(
                 onStart: { flow = .modeSelect },
                 onSettings: { showSettings = true },
-                onHowToPlay: { showHowToPlay = true }
+                onHowToPlay: { showHowToPlay = true },
+                onSkillGuide: { showSkillGuide = true }
             )
         case .modeSelect:
             ModeSelectView(
@@ -342,6 +347,7 @@ private struct SelectionCard: View {
                     Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -733,6 +739,7 @@ struct StartView: View {
     let onStart: () -> Void
     let onSettings: () -> Void
     let onHowToPlay: () -> Void
+    let onSkillGuide: () -> Void
 
     var body: some View {
         ZStack {
@@ -768,6 +775,9 @@ struct StartView: View {
                         secondaryButton("設定", identifier: "settings-button", action: onSettings)
                     }
                     .frame(maxWidth: 240)
+
+                    secondaryButton("スキルガイド", identifier: "skill-guide-button", action: onSkillGuide)
+                        .frame(maxWidth: 240)
                 }
                 .padding(.top, 8)
 
@@ -858,6 +868,16 @@ struct ResultView: View {
                     .font(.system(size: 44, weight: .heavy, design: .rounded))
                     .foregroundStyle(outcomeColor)
 
+                // Which CPU strength this result was played against; retry reuses it.
+                Text("CPU：\(difficulty.displayName)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(.white.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(Palette.away.opacity(0.5), lineWidth: 1))
+                    .accessibilityIdentifier("result-difficulty-badge")
+
                 HStack(spacing: 20) {
                     scoreCard(title: "あなた", value: score.home, color: Palette.home)
                     Text("-").font(.system(size: 32, weight: .bold)).foregroundStyle(.white.opacity(0.5))
@@ -947,16 +967,19 @@ private struct InfoScreen<Content: View>: View {
     }
 }
 
-// A titled group of bullet lines used inside the information screens.
+// A titled group of bullet lines used inside the information screens. `identifier`
+// tags the section title for UI tests; sections that tests never target omit it.
 private struct InfoSection: View {
     let title: String
     let lines: [String]
+    var identifier: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased())
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Palette.accent)
+                .accessibilityIdentifier(identifier)
             ForEach(lines, id: \.self) { line in
                 HStack(alignment: .top, spacing: 8) {
                     Circle()
@@ -1003,6 +1026,46 @@ private struct SettingsView: View {
             InfoSection(title: "このアプリについて", lines: [
                 "プロトタイプ・ローカル対戦中心",
                 "オンラインは現在未対応"
+            ])
+        }
+    }
+}
+
+// Explains the three skills. The numbers shown are the shared MatchConfig defaults
+// (identical for the player and the CPU); the CPU's internal decision thresholds are
+// deliberately not exposed here.
+private struct SkillGuideView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        InfoScreen(
+            title: "スキルガイド",
+            screenIdentifier: "skill-guide-screen",
+            closeIdentifier: "close-skill-guide-button",
+            onClose: onClose
+        ) {
+            InfoSection(title: "ブースト", lines: [
+                "移動速度が1.6倍になる（効果2.0秒 / CD6秒）",
+                "先回りや守備への復帰に使いやすい",
+                "扱いやすさ：かんたん"
+            ], identifier: "skill-guide-boost")
+            InfoSection(title: "ショット", lines: [
+                "次の有効な打球が1.8倍の速さで飛ぶ（構え1.2秒 / CD7秒）",
+                "強打やブーストとの連携に有効",
+                "構え中に当てられないと空振りでもCDに入る",
+                "扱いやすさ：ふつう"
+            ], identifier: "skill-guide-shot")
+            InfoSection(title: "ブロック", lines: [
+                "自分のゴール前にシールドを張る（効果1.5秒 / CD8秒）",
+                "相手の強打への対応に有効",
+                "展開する前に通過したパックは防げない",
+                "扱いやすさ：ふつう"
+            ], identifier: "skill-guide-block")
+            InfoSection(title: "CPU", lines: [
+                "CPUも同じ3つのスキルを使ってくる"
+            ])
+            InfoSection(title: "オンライン", lines: [
+                "準備中"
             ])
         }
     }

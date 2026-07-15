@@ -86,6 +86,29 @@ final class PuckClashUITests: XCTestCase {
     }
 
     @MainActor
+    func testSkillGuideOpensAndCloses() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let skillGuideButton = app.buttons["skill-guide-button"]
+        XCTAssertTrue(skillGuideButton.waitForExistence(timeout: 5))
+        skillGuideButton.tap()
+
+        // The guide lists all three skills.
+        XCTAssertTrue(app.staticTexts["skill-guide-screen"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["skill-guide-boost"].exists)
+        XCTAssertTrue(app.staticTexts["skill-guide-shot"].exists)
+        XCTAssertTrue(app.staticTexts["skill-guide-block"].exists)
+
+        let closeButton = app.buttons["close-skill-guide-button"]
+        XCTAssertTrue(closeButton.waitForExistence(timeout: 5))
+        closeButton.tap()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["skill-guide-screen"].exists)
+    }
+
+    @MainActor
     func testCPUPracticeFlowReachesMatch() throws {
         let app = XCUIApplication()
         app.launch()
