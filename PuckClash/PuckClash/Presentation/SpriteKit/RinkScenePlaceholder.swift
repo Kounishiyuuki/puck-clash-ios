@@ -15,6 +15,9 @@ final class RinkScene: SKScene {
     private var lastBoostPhase: SkillPhase = .ready
     private var lastShotPhase: SkillPhase = .ready
     private var lastHomeBlockPhase: SkillPhase = .ready
+    private var lastAwayBoostPhase: SkillPhase = .ready
+    private var lastAwayShotPhase: SkillPhase = .ready
+    private var lastAwayBlockPhase: SkillPhase = .ready
     private var lastUpdateTime: TimeInterval?
 
     private let rinkNode = SKShapeNode()
@@ -35,6 +38,9 @@ final class RinkScene: SKScene {
     private let puckNode = SKShapeNode()
     private let puckHighlightNode = SKShapeNode()
     private let homeBlockShieldNode = SKShapeNode()
+    private let awayBoostRingNode = SKShapeNode()
+    private let awayShotRingNode = SKShapeNode()
+    private let awayBlockShieldNode = SKShapeNode()
 
     private let homeColor = SKColor(red: 0.16, green: 0.52, blue: 1.0, alpha: 1)
     private let awayColor = SKColor(red: 0.95, green: 0.28, blue: 0.34, alpha: 1)
@@ -212,6 +218,49 @@ final class RinkScene: SKScene {
             homeBlockShieldNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "blockShield")
         }
         lastHomeBlockPhase = homeBlockPhase
+
+        // Away CPU skill feedback: render-only mirrors of the home effects, driven the
+        // same way by observed phase transitions. Each has its own node and action key,
+        // so a state change on one never cancels another (Boost and Shot can be active
+        // at the same time under the CPU's decision rules).
+        let awayBoostPhase = state.awayBoost.phase
+        if awayBoostPhase == .active, lastAwayBoostPhase != .active {
+            awayStrikerNode.run(
+                .sequence([.scale(to: 1.18, duration: 0.08), .scale(to: 1.0, duration: 0.14)]),
+                withKey: "awayBoostPulse"
+            )
+            awayBoostRingNode.removeAction(forKey: "awayBoostRing")
+            awayBoostRingNode.run(.fadeAlpha(to: 0.9, duration: 0.12), withKey: "awayBoostRing")
+        } else if awayBoostPhase != .active, lastAwayBoostPhase == .active {
+            awayBoostRingNode.removeAction(forKey: "awayBoostRing")
+            awayBoostRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "awayBoostRing")
+        }
+        lastAwayBoostPhase = awayBoostPhase
+
+        let awayShotPhase = state.awayShot.phase
+        if awayShotPhase == .active, lastAwayShotPhase != .active {
+            awayShotRingNode.removeAction(forKey: "awayShotPulse")
+            awayShotRingNode.run(
+                .sequence([.scale(to: 1.12, duration: 0.08), .scale(to: 1.0, duration: 0.14)]),
+                withKey: "awayShotPulse"
+            )
+            awayShotRingNode.removeAction(forKey: "awayShotRing")
+            awayShotRingNode.run(.fadeAlpha(to: 0.85, duration: 0.12), withKey: "awayShotRing")
+        } else if awayShotPhase != .active, lastAwayShotPhase == .active {
+            awayShotRingNode.removeAction(forKey: "awayShotRing")
+            awayShotRingNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "awayShotRing")
+        }
+        lastAwayShotPhase = awayShotPhase
+
+        let awayBlockPhase = state.awayBlock.phase
+        if awayBlockPhase == .active, lastAwayBlockPhase != .active {
+            awayBlockShieldNode.removeAction(forKey: "awayBlockShield")
+            awayBlockShieldNode.run(.fadeAlpha(to: 0.85, duration: 0.12), withKey: "awayBlockShield")
+        } else if awayBlockPhase != .active, lastAwayBlockPhase == .active {
+            awayBlockShieldNode.removeAction(forKey: "awayBlockShield")
+            awayBlockShieldNode.run(.fadeAlpha(to: 0, duration: 0.18), withKey: "awayBlockShield")
+        }
+        lastAwayBlockPhase = awayBlockPhase
     }
 
     private func flash(_ node: SKShapeNode) {
@@ -277,12 +326,37 @@ final class RinkScene: SKScene {
         homeShotRingNode.alpha = 0
         homeStrikerNode.addChild(homeShotRingNode)
 
+        // Hidden until the away CPU's Boost is active; a glowing ring around the away
+        // striker, mirroring the home boost ring but as its own node.
+        awayBoostRingNode.strokeColor = awayColor
+        awayBoostRingNode.lineWidth = 3
+        awayBoostRingNode.fillColor = .clear
+        awayBoostRingNode.alpha = 0
+        awayStrikerNode.addChild(awayBoostRingNode)
+
+        // Hidden until the away CPU's Shot is armed; a ticked reticle (ring + four
+        // marks), thinner and larger than the boost ring so the two read as distinct
+        // even when both are active at once.
+        awayShotRingNode.strokeColor = awayColor
+        awayShotRingNode.lineWidth = 2
+        awayShotRingNode.fillColor = .clear
+        awayShotRingNode.alpha = 0
+        awayStrikerNode.addChild(awayShotRingNode)
+
         // Hidden until Block is active; a home-colour bar in front of the bottom goal.
         homeBlockShieldNode.strokeColor = homeColor
         homeBlockShieldNode.lineWidth = 6
         homeBlockShieldNode.lineCap = .round
         homeBlockShieldNode.alpha = 0
         addChild(homeBlockShieldNode)
+
+        // Hidden until the away CPU's Block is active; an away-colour bar in front of
+        // the top goal, mirroring the home shield.
+        awayBlockShieldNode.strokeColor = awayColor
+        awayBlockShieldNode.lineWidth = 6
+        awayBlockShieldNode.lineCap = .round
+        awayBlockShieldNode.alpha = 0
+        addChild(awayBlockShieldNode)
 
         puckNode.fillColor = SKColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         puckNode.strokeColor = SKColor(red: 0.85, green: 0.90, blue: 1.0, alpha: 1)
@@ -362,6 +436,15 @@ final class RinkScene: SKScene {
         let shieldY = scenePoint(for: Vector2(x: 0, y: blockOffset), config: config, rinkFrame: frame).y
         homeBlockShieldNode.path = linePath(from: CGPoint(x: goalMinX, y: shieldY), to: CGPoint(x: goalMaxX, y: shieldY))
 
+        // Away shield: the engine's line mirrored to the top goal (rinkSize.y - offset),
+        // spanning the same goal mouth, so the visual matches the actual reflection line.
+        let awayShieldY = scenePoint(
+            for: Vector2(x: 0, y: config.rinkSize.y - blockOffset),
+            config: config,
+            rinkFrame: frame
+        ).y
+        awayBlockShieldNode.path = linePath(from: CGPoint(x: goalMinX, y: awayShieldY), to: CGPoint(x: goalMaxX, y: awayShieldY))
+
         let strikerRadius = config.strikerRadius * scale
         let puckRadius = config.puckRadius * scale
 
@@ -373,6 +456,8 @@ final class RinkScene: SKScene {
 
         awayStrikerNode.path = discPath(radius: strikerRadius)
         awayStrikerInnerNode.path = discPath(radius: strikerRadius * 0.55)
+        awayBoostRingNode.path = discPath(radius: strikerRadius * 1.35)
+        awayShotRingNode.path = reticlePath(radius: strikerRadius * 1.6)
         awayStrikerNode.position = scenePoint(for: state.awayPlayer.position, config: config, rinkFrame: frame)
 
         let puckPoint = scenePoint(for: state.puck.position, config: config, rinkFrame: frame)
@@ -430,6 +515,20 @@ final class RinkScene: SKScene {
 
     private func discPath(radius: CGFloat) -> CGPath {
         CGPath(ellipseIn: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2), transform: nil)
+    }
+
+    // A ring with four short tick marks (top/bottom/left/right), used for the away
+    // Shot so it reads as "aiming" and stays distinguishable from the plain boost ring.
+    private func reticlePath(radius: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.addEllipse(in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
+        let tickInner = radius * 0.82
+        let tickOuter = radius * 1.14
+        for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            path.move(to: CGPoint(x: dx * tickInner, y: dy * tickInner))
+            path.addLine(to: CGPoint(x: dx * tickOuter, y: dy * tickOuter))
+        }
+        return path
     }
 
     private func linePath(from start: CGPoint, to end: CGPoint) -> CGPath {
