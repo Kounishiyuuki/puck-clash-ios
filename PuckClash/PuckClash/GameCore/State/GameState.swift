@@ -287,6 +287,10 @@ struct GameState: Equatable {
     var awayShot: SkillState
     var homeBlock: SkillState
     var awayBlock: SkillState
+    // Countdown until the away CPU next re-evaluates which skill to use. Lives in GameState
+    // (not the engine) so the CPU decision cadence is reproducible from a snapshot and stays
+    // deterministic; advanced by GameEngine each fixed step. Not a wall-clock time.
+    var awaySkillDecisionRemaining: TimeInterval
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
@@ -315,7 +319,8 @@ struct GameState: Equatable {
             homeShot: .ready,
             awayShot: .ready,
             homeBlock: .ready,
-            awayBlock: .ready
+            awayBlock: .ready,
+            awaySkillDecisionRemaining: 0
         )
     }
 }
