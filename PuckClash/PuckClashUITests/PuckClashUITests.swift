@@ -90,7 +90,7 @@ final class PuckClashUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // Start -> Mode Select -> Map Select -> Match.
+        // Start -> Mode Select -> CPU Difficulty Select -> Map Select -> Match.
         let startButton = app.buttons["start-match-button"]
         XCTAssertTrue(startButton.waitForExistence(timeout: 5))
         startButton.tap()
@@ -98,6 +98,10 @@ final class PuckClashUITests: XCTestCase {
         let cpuCard = app.buttons["mode-cpu-practice"]
         XCTAssertTrue(cpuCard.waitForExistence(timeout: 5))
         cpuCard.tap()
+
+        let normalDifficulty = app.buttons["cpu-difficulty-normal"]
+        XCTAssertTrue(normalDifficulty.waitForExistence(timeout: 5))
+        normalDifficulty.tap()
 
         let classicMap = app.buttons["map-classic"]
         XCTAssertTrue(classicMap.waitForExistence(timeout: 5))
@@ -115,11 +119,13 @@ final class PuckClashUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // Start -> Mode Select -> Map Select -> Match.
+        // Start -> Mode Select -> CPU Difficulty Select -> Map Select -> Match.
         XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
         app.buttons["start-match-button"].tap()
         XCTAssertTrue(app.buttons["mode-cpu-practice"].waitForExistence(timeout: 5))
         app.buttons["mode-cpu-practice"].tap()
+        XCTAssertTrue(app.buttons["cpu-difficulty-normal"].waitForExistence(timeout: 5))
+        app.buttons["cpu-difficulty-normal"].tap()
         let classicMap = app.buttons["map-classic"]
         XCTAssertTrue(classicMap.waitForExistence(timeout: 5))
         classicMap.tap()
@@ -141,6 +147,45 @@ final class PuckClashUITests: XCTestCase {
 
         // The match keeps running: the joystick is still present after activating.
         XCTAssertTrue(app.otherElements["joystick-control"].exists)
+    }
+
+    @MainActor
+    func testCPUDifficultyScreenShowsAllOptionsAndBackReturns() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        app.buttons["start-match-button"].tap()
+        XCTAssertTrue(app.buttons["mode-cpu-practice"].waitForExistence(timeout: 5))
+        app.buttons["mode-cpu-practice"].tap()
+
+        // The difficulty screen offers all three presets.
+        XCTAssertTrue(app.staticTexts["cpu-difficulty-screen"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["cpu-difficulty-easy"].exists)
+        XCTAssertTrue(app.buttons["cpu-difficulty-normal"].exists)
+        XCTAssertTrue(app.buttons["cpu-difficulty-hard"].exists)
+
+        // Back returns to mode selection without entering a match.
+        app.buttons["cpu-difficulty-back"].tap()
+        XCTAssertTrue(app.buttons["mode-cpu-practice"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["joystick-control"].exists)
+    }
+
+    @MainActor
+    func testHardDifficultyAlsoReachesMatch() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        app.buttons["start-match-button"].tap()
+        XCTAssertTrue(app.buttons["mode-cpu-practice"].waitForExistence(timeout: 5))
+        app.buttons["mode-cpu-practice"].tap()
+        XCTAssertTrue(app.buttons["cpu-difficulty-hard"].waitForExistence(timeout: 5))
+        app.buttons["cpu-difficulty-hard"].tap()
+        XCTAssertTrue(app.buttons["map-classic"].waitForExistence(timeout: 5))
+        app.buttons["map-classic"].tap()
+
+        XCTAssertTrue(app.otherElements["joystick-control"].waitForExistence(timeout: 5))
     }
 
     @MainActor

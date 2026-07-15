@@ -114,6 +114,64 @@ struct BlockConfig: Equatable {
     var restitution: Double = 1.0
 }
 
+// Selectable strength of the away CPU. Difficulty only changes how quickly and
+// eagerly the CPU decides to use skills (see CPUBehaviorConfig) — never striker
+// speed, puck physics, or the skill values themselves. Presentation-facing text
+// (display names, descriptions) lives in the UI layer, not here.
+enum CPUDifficulty: String, CaseIterable, Equatable {
+    case easy
+    case normal
+    case hard
+
+    var behavior: CPUBehaviorConfig {
+        switch self {
+        case .easy:
+            return .easy
+        case .normal:
+            return .normal
+        case .hard:
+            return .hard
+        }
+    }
+}
+
+// Tunable away-CPU skill-decision parameters, held by MatchConfig like the skill
+// configs. All values are in simulated time / rink-relative units, so decisions
+// stay deterministic and frame-rate independent.
+struct CPUBehaviorConfig: Equatable {
+    // Seconds of simulated time between CPU skill decisions.
+    var decisionInterval: TimeInterval
+    // Max predicted time-to-shield (s) the CPU reacts to with Block.
+    var blockReactionWindow: TimeInterval
+    // Shot contact margin as a multiple of puckRadius.
+    var shotContactMarginScale: Double
+    // Boost fires when striker-to-puck distance exceeds this fraction of rink height.
+    var boostDistanceThresholdFraction: Double
+
+    static let easy = CPUBehaviorConfig(
+        decisionInterval: 0.30,
+        blockReactionWindow: 0.18,
+        shotContactMarginScale: 0.75,
+        boostDistanceThresholdFraction: 0.45
+    )
+
+    // Matches the values the engine originally hardcoded, so Normal is the
+    // unchanged baseline behaviour.
+    static let normal = CPUBehaviorConfig(
+        decisionInterval: 0.15,
+        blockReactionWindow: 0.30,
+        shotContactMarginScale: 1.50,
+        boostDistanceThresholdFraction: 0.35
+    )
+
+    static let hard = CPUBehaviorConfig(
+        decisionInterval: 0.10,
+        blockReactionWindow: 0.38,
+        shotContactMarginScale: 2.00,
+        boostDistanceThresholdFraction: 0.28
+    )
+}
+
 // Vertical air-hockey board: home defends the bottom (y = 0) and attacks the top
 // goal (y = rinkSize.y); away is the mirror. Goals are an X-range mouth on the
 // top/bottom edges; the left/right edges are always walls.
@@ -138,6 +196,9 @@ struct MatchConfig: Equatable {
     let shot: ShotConfig
     // Block skill tuning, agreed by both sides of the match.
     let block: BlockConfig
+    // Away-CPU skill-decision tuning; Normal by default so existing configs keep
+    // the original CPU behaviour.
+    let cpuBehavior: CPUBehaviorConfig
 
     init(
         rinkSize: Vector2,
@@ -153,7 +214,8 @@ struct MatchConfig: Equatable {
         tickRate: Double = 60,
         boost: BoostConfig = BoostConfig(),
         shot: ShotConfig = ShotConfig(),
-        block: BlockConfig = BlockConfig()
+        block: BlockConfig = BlockConfig(),
+        cpuBehavior: CPUBehaviorConfig = .normal
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -169,6 +231,29 @@ struct MatchConfig: Equatable {
         self.boost = boost
         self.shot = shot
         self.block = block
+        self.cpuBehavior = cpuBehavior
+    }
+
+    // The same match tuned for a CPU difficulty: geometry, physics and skill values
+    // unchanged, only the CPU's decision behaviour replaced.
+    func withCPUBehavior(_ cpuBehavior: CPUBehaviorConfig) -> MatchConfig {
+        MatchConfig(
+            rinkSize: rinkSize,
+            matchDuration: matchDuration,
+            strikerMaxSpeed: strikerMaxSpeed,
+            goalMouthHalfWidth: goalMouthHalfWidth,
+            strikerRadius: strikerRadius,
+            puckRadius: puckRadius,
+            strikerHitRestitution: strikerHitRestitution,
+            wallRestitution: wallRestitution,
+            puckDamping: puckDamping,
+            puckStopSpeed: puckStopSpeed,
+            tickRate: tickRate,
+            boost: boost,
+            shot: shot,
+            block: block,
+            cpuBehavior: cpuBehavior
+        )
     }
 
     var rinkCenter: Vector2 {

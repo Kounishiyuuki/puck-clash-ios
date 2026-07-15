@@ -8,17 +8,39 @@
 import Combine
 import SwiftUI
 
-enum GameMode {
-    case cpuPractice
-    case online
-}
-
 enum MatchFlow {
     case start
     case modeSelect
-    case mapSelect(GameMode)
-    case match(MapDefinition)
-    case result(ScoreState, MapDefinition)
+    case difficultySelect
+    case mapSelect(CPUDifficulty)
+    case match(MapDefinition, CPUDifficulty)
+    case result(ScoreState, MapDefinition, CPUDifficulty)
+}
+
+// UI-facing difficulty text. GameCore stays free of presentation strings, so the
+// display names and descriptions live here next to the views that show them.
+extension CPUDifficulty {
+    var displayName: String {
+        switch self {
+        case .easy:
+            return "かんたん"
+        case .normal:
+            return "ふつう"
+        case .hard:
+            return "むずかしい"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .easy:
+            return "ゆっくり判断するCPU。初めての練習向け"
+        case .normal:
+            return "標準的な反応のCPU。おすすめ"
+        case .hard:
+            return "素早くスキルを判断するCPU。慣れたプレイヤー向け"
+        }
+    }
 }
 
 // Plain value snapshot the SpriteKit scene pushes to the SwiftUI HUD. Holds no
@@ -109,30 +131,40 @@ struct ContentView: View {
             )
         case .modeSelect:
             ModeSelectView(
-                onSelectCPU: { flow = .mapSelect(.cpuPractice) },
+                onSelectCPU: { flow = .difficultySelect },
                 onBack: { flow = .start }
             )
-        case .mapSelect:
-            MapSelectView(
-                onSelectMap: { map in startMatch(map) },
+        case .difficultySelect:
+            DifficultySelectView(
+                onSelectDifficulty: { difficulty in flow = .mapSelect(difficulty) },
                 onBack: { flow = .modeSelect }
             )
-        case .match(let map):
-            MatchView(map: map, onFinished: { score in flow = .result(score, map) })
-                .id(matchID)
-        case .result(let score, let map):
+        case .mapSelect(let difficulty):
+            MapSelectView(
+                onSelectMap: { map in startMatch(map, difficulty: difficulty) },
+                onBack: { flow = .difficultySelect }
+            )
+        case .match(let map, let difficulty):
+            MatchView(
+                map: map,
+                difficulty: difficulty,
+                onFinished: { score in flow = .result(score, map, difficulty) }
+            )
+            .id(matchID)
+        case .result(let score, let map, let difficulty):
             ResultView(
                 score: score,
-                onRetry: { startMatch(map) },
+                difficulty: difficulty,
+                onRetry: { startMatch(map, difficulty: difficulty) },
                 onBackToTitle: { flow = .start }
             )
         }
     }
 
     // A new match identity rebuilds the controller (and its scene/engine).
-    private func startMatch(_ map: MapDefinition) {
+    private func startMatch(_ map: MapDefinition, difficulty: CPUDifficulty) {
         matchID = UUID()
-        flow = .match(map)
+        flow = .match(map, difficulty)
     }
 }
 
@@ -217,6 +249,45 @@ private struct ComingSoonView: View {
     }
 }
 
+// CPU difficulty picker between mode and map selection. Shows the three presets as
+// cards; internal thresholds and timings stay hidden from the player.
+private struct DifficultySelectView: View {
+    let onSelectDifficulty: (CPUDifficulty) -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 14) {
+                Text("CPUの強さ")
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 4)
+                    .accessibilityIdentifier("cpu-difficulty-screen")
+
+                ForEach(CPUDifficulty.allCases, id: \.self) { difficulty in
+                    SelectionCard(
+                        title: difficulty.displayName,
+                        subtitle: difficulty.summary,
+                        accent: Palette.home,
+                        dimmed: false,
+                        action: { onSelectDifficulty(difficulty) }
+                    )
+                    .accessibilityIdentifier("cpu-difficulty-\(difficulty.rawValue)")
+                }
+
+                Button("戻る", action: onBack)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("cpu-difficulty-back")
+            }
+            .padding()
+        }
+    }
+}
+
 private struct MapSelectView: View {
     let onSelectMap: (MapDefinition) -> Void
     let onBack: () -> Void
@@ -289,8 +360,13 @@ private struct SelectionCard: View {
 struct MatchView: View {
     @StateObject private var controller: MatchController
 
-    init(map: MapDefinition, onFinished: @escaping (ScoreState) -> Void) {
-        _controller = StateObject(wrappedValue: MatchController(config: map.config, onFinished: onFinished))
+    init(map: MapDefinition, difficulty: CPUDifficulty, onFinished: @escaping (ScoreState) -> Void) {
+        _controller = StateObject(
+            wrappedValue: MatchController(
+                config: map.config.withCPUBehavior(difficulty.behavior),
+                onFinished: onFinished
+            )
+        )
     }
 
     var body: some View {
@@ -743,6 +819,7 @@ private struct RinkEmblem: View {
 
 struct ResultView: View {
     let score: ScoreState
+    let difficulty: CPUDifficulty
     let onRetry: () -> Void
     let onBackToTitle: () -> Void
 
