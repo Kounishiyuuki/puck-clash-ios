@@ -8,17 +8,39 @@
 import Combine
 import SwiftUI
 
-enum GameMode {
-    case cpuPractice
-    case online
-}
-
 enum MatchFlow {
     case start
     case modeSelect
-    case mapSelect(GameMode)
-    case match(MapDefinition)
-    case result(ScoreState, MapDefinition)
+    case difficultySelect
+    case mapSelect(CPUDifficulty)
+    case match(MapDefinition, CPUDifficulty)
+    case result(ScoreState, MapDefinition, CPUDifficulty)
+}
+
+// UI-facing difficulty text. GameCore stays free of presentation strings, so the
+// display names and descriptions live here next to the views that show them.
+extension CPUDifficulty {
+    var displayName: String {
+        switch self {
+        case .easy:
+            return "かんたん"
+        case .normal:
+            return "ふつう"
+        case .hard:
+            return "むずかしい"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .easy:
+            return "ゆっくり判断するCPU。初めての練習向け"
+        case .normal:
+            return "標準的な反応のCPU。おすすめ"
+        case .hard:
+            return "素早くスキルを判断するCPU。慣れたプレイヤー向け"
+        }
+    }
 }
 
 // Plain value snapshot the SpriteKit scene pushes to the SwiftUI HUD. Holds no
@@ -88,6 +110,7 @@ struct ContentView: View {
     @State private var matchID = UUID()
     @State private var showSettings = false
     @State private var showHowToPlay = false
+    @State private var showSkillGuide = false
 
     var body: some View {
         content
@@ -97,6 +120,9 @@ struct ContentView: View {
             .sheet(isPresented: $showHowToPlay) {
                 HowToPlayView(onClose: { showHowToPlay = false })
             }
+            .sheet(isPresented: $showSkillGuide) {
+                SkillGuideView(onClose: { showSkillGuide = false })
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -105,34 +131,45 @@ struct ContentView: View {
             StartView(
                 onStart: { flow = .modeSelect },
                 onSettings: { showSettings = true },
-                onHowToPlay: { showHowToPlay = true }
+                onHowToPlay: { showHowToPlay = true },
+                onSkillGuide: { showSkillGuide = true }
             )
         case .modeSelect:
             ModeSelectView(
-                onSelectCPU: { flow = .mapSelect(.cpuPractice) },
+                onSelectCPU: { flow = .difficultySelect },
                 onBack: { flow = .start }
             )
-        case .mapSelect:
-            MapSelectView(
-                onSelectMap: { map in startMatch(map) },
+        case .difficultySelect:
+            DifficultySelectView(
+                onSelectDifficulty: { difficulty in flow = .mapSelect(difficulty) },
                 onBack: { flow = .modeSelect }
             )
-        case .match(let map):
-            MatchView(map: map, onFinished: { score in flow = .result(score, map) })
-                .id(matchID)
-        case .result(let score, let map):
+        case .mapSelect(let difficulty):
+            MapSelectView(
+                onSelectMap: { map in startMatch(map, difficulty: difficulty) },
+                onBack: { flow = .difficultySelect }
+            )
+        case .match(let map, let difficulty):
+            MatchView(
+                map: map,
+                difficulty: difficulty,
+                onFinished: { score in flow = .result(score, map, difficulty) }
+            )
+            .id(matchID)
+        case .result(let score, let map, let difficulty):
             ResultView(
                 score: score,
-                onRetry: { startMatch(map) },
+                difficulty: difficulty,
+                onRetry: { startMatch(map, difficulty: difficulty) },
                 onBackToTitle: { flow = .start }
             )
         }
     }
 
     // A new match identity rebuilds the controller (and its scene/engine).
-    private func startMatch(_ map: MapDefinition) {
+    private func startMatch(_ map: MapDefinition, difficulty: CPUDifficulty) {
         matchID = UUID()
-        flow = .match(map)
+        flow = .match(map, difficulty)
     }
 }
 
@@ -217,6 +254,45 @@ private struct ComingSoonView: View {
     }
 }
 
+// CPU difficulty picker between mode and map selection. Shows the three presets as
+// cards; internal thresholds and timings stay hidden from the player.
+private struct DifficultySelectView: View {
+    let onSelectDifficulty: (CPUDifficulty) -> Void
+    let onBack: () -> Void
+
+    var body: some View {
+        ZStack {
+            ArenaBackground()
+
+            VStack(spacing: 14) {
+                Text("CPUの強さ")
+                    .font(.system(size: 32, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.bottom, 4)
+                    .accessibilityIdentifier("cpu-difficulty-screen")
+
+                ForEach(CPUDifficulty.allCases, id: \.self) { difficulty in
+                    SelectionCard(
+                        title: difficulty.displayName,
+                        subtitle: difficulty.summary,
+                        accent: Palette.home,
+                        dimmed: false,
+                        action: { onSelectDifficulty(difficulty) }
+                    )
+                    .accessibilityIdentifier("cpu-difficulty-\(difficulty.rawValue)")
+                }
+
+                Button("戻る", action: onBack)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.top, 8)
+                    .accessibilityIdentifier("cpu-difficulty-back")
+            }
+            .padding()
+        }
+    }
+}
+
 private struct MapSelectView: View {
     let onSelectMap: (MapDefinition) -> Void
     let onBack: () -> Void
@@ -271,6 +347,7 @@ private struct SelectionCard: View {
                     Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -289,8 +366,13 @@ private struct SelectionCard: View {
 struct MatchView: View {
     @StateObject private var controller: MatchController
 
-    init(map: MapDefinition, onFinished: @escaping (ScoreState) -> Void) {
-        _controller = StateObject(wrappedValue: MatchController(config: map.config, onFinished: onFinished))
+    init(map: MapDefinition, difficulty: CPUDifficulty, onFinished: @escaping (ScoreState) -> Void) {
+        _controller = StateObject(
+            wrappedValue: MatchController(
+                config: map.config.withCPUBehavior(difficulty.behavior),
+                onFinished: onFinished
+            )
+        )
     }
 
     var body: some View {
@@ -657,6 +739,7 @@ struct StartView: View {
     let onStart: () -> Void
     let onSettings: () -> Void
     let onHowToPlay: () -> Void
+    let onSkillGuide: () -> Void
 
     var body: some View {
         ZStack {
@@ -692,6 +775,9 @@ struct StartView: View {
                         secondaryButton("設定", identifier: "settings-button", action: onSettings)
                     }
                     .frame(maxWidth: 240)
+
+                    secondaryButton("スキルガイド", identifier: "skill-guide-button", action: onSkillGuide)
+                        .frame(maxWidth: 240)
                 }
                 .padding(.top, 8)
 
@@ -743,6 +829,7 @@ private struct RinkEmblem: View {
 
 struct ResultView: View {
     let score: ScoreState
+    let difficulty: CPUDifficulty
     let onRetry: () -> Void
     let onBackToTitle: () -> Void
 
@@ -780,6 +867,16 @@ struct ResultView: View {
                 Text(outcomeText)
                     .font(.system(size: 44, weight: .heavy, design: .rounded))
                     .foregroundStyle(outcomeColor)
+
+                // Which CPU strength this result was played against; retry reuses it.
+                Text("CPU：\(difficulty.displayName)")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(.white.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(Palette.away.opacity(0.5), lineWidth: 1))
+                    .accessibilityIdentifier("result-difficulty-badge")
 
                 HStack(spacing: 20) {
                     scoreCard(title: "あなた", value: score.home, color: Palette.home)
@@ -870,16 +967,19 @@ private struct InfoScreen<Content: View>: View {
     }
 }
 
-// A titled group of bullet lines used inside the information screens.
+// A titled group of bullet lines used inside the information screens. `identifier`
+// tags the section title for UI tests; sections that tests never target omit it.
 private struct InfoSection: View {
     let title: String
     let lines: [String]
+    var identifier: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased())
                 .font(.caption.weight(.bold))
                 .foregroundStyle(Palette.accent)
+                .accessibilityIdentifier(identifier)
             ForEach(lines, id: \.self) { line in
                 HStack(alignment: .top, spacing: 8) {
                     Circle()
@@ -926,6 +1026,46 @@ private struct SettingsView: View {
             InfoSection(title: "このアプリについて", lines: [
                 "プロトタイプ・ローカル対戦中心",
                 "オンラインは現在未対応"
+            ])
+        }
+    }
+}
+
+// Explains the three skills. The numbers shown are the shared MatchConfig defaults
+// (identical for the player and the CPU); the CPU's internal decision thresholds are
+// deliberately not exposed here.
+private struct SkillGuideView: View {
+    let onClose: () -> Void
+
+    var body: some View {
+        InfoScreen(
+            title: "スキルガイド",
+            screenIdentifier: "skill-guide-screen",
+            closeIdentifier: "close-skill-guide-button",
+            onClose: onClose
+        ) {
+            InfoSection(title: "ブースト", lines: [
+                "移動速度が1.6倍になる（効果2.0秒 / CD6秒）",
+                "先回りや守備への復帰に使いやすい",
+                "扱いやすさ：かんたん"
+            ], identifier: "skill-guide-boost")
+            InfoSection(title: "ショット", lines: [
+                "次の有効な打球が1.8倍の速さで飛ぶ（構え1.2秒 / CD7秒）",
+                "強打やブーストとの連携に有効",
+                "構え中に当てられないと空振りでもCDに入る",
+                "扱いやすさ：ふつう"
+            ], identifier: "skill-guide-shot")
+            InfoSection(title: "ブロック", lines: [
+                "自分のゴール前にシールドを張る（効果1.5秒 / CD8秒）",
+                "相手の強打への対応に有効",
+                "展開する前に通過したパックは防げない",
+                "扱いやすさ：ふつう"
+            ], identifier: "skill-guide-block")
+            InfoSection(title: "CPU", lines: [
+                "CPUも同じ3つのスキルを使ってくる"
+            ])
+            InfoSection(title: "オンライン", lines: [
+                "準備中"
             ])
         }
     }

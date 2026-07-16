@@ -1,11 +1,6 @@
 import Foundation
 
 struct GameEngine {
-    // How often (in simulated seconds) the away CPU re-decides which skill to use. Keeps the
-    // CPU from reacting every 1/60 s tick (superhuman) or re-firing the instant a skill
-    // leaves cooldown. Simulated time only — never wall clock.
-    private static let cpuSkillDecisionInterval: TimeInterval = 0.15
-
     private(set) var state: GameState
 
     init(state: GameState = .initial()) {
@@ -211,9 +206,10 @@ struct GameEngine {
     // Minimal deterministic away CPU: track the puck's x, intercept it in the upper
     // half, otherwise hold a default defensive spot. The half clamp keeps it above
     // center, so it never crosses the center line. It also decides skills on a throttled,
-    // deterministic cadence (see cpuSkillDecisionInterval): the decision timer is advanced
+    // deterministic cadence (config.cpuBehavior.decisionInterval, so difficulty can tune
+    // it without the CPU reacting every 1/60 s tick): the decision timer is advanced
     // here, and on a decision tick at most one ready skill is requested (Block > Shot >
-    // Boost). Non-decision ticks request no skill.
+    // Boost). Non-decision ticks request no skill. Simulated time only — never wall clock.
     private mutating func awayCPUInput(deltaTime: TimeInterval) -> PlayerInput {
         let targetX = state.puck.position.x
         let targetY: Double
@@ -226,7 +222,7 @@ struct GameEngine {
         var activatedSkills: Set<SkillID> = []
         state.awaySkillDecisionRemaining -= deltaTime
         if state.awaySkillDecisionRemaining <= 0 {
-            state.awaySkillDecisionRemaining = Self.cpuSkillDecisionInterval
+            state.awaySkillDecisionRemaining = state.config.cpuBehavior.decisionInterval
             if let skill = cpuSkillActivation(for: state) {
                 activatedSkills = [skill]
             }
@@ -259,7 +255,7 @@ struct GameEngine {
             let shieldLineY = config.rinkSize.y - offset
             if puckVelocity.y > velocityEpsilon, puck.y < shieldLineY {
                 let timeToShield = (shieldLineY - puck.y) / puckVelocity.y
-                if timeToShield > 0, timeToShield <= 0.30 {
+                if timeToShield > 0, timeToShield <= config.cpuBehavior.blockReactionWindow {
                     let predictedX = puck.x + puckVelocity.x * timeToShield
                     if abs(predictedX - centerX) <= goalHalfWidth {
                         return .block
@@ -271,7 +267,7 @@ struct GameEngine {
         // Shot: away attacks the bottom goal. Fire when the puck is close to the away
         // striker and the striker is above it, so a downward hit sends the puck home.
         if state.awayShot.phase == .ready {
-            let contactMargin = config.puckRadius * 1.5
+            let contactMargin = config.puckRadius * config.cpuBehavior.shotContactMarginScale
             let contactRange = config.strikerRadius + config.puckRadius + contactMargin
             let distance = (puck - away).length
             if distance <= contactRange, away.y > puck.y {
@@ -282,7 +278,7 @@ struct GameEngine {
         // Boost: reposition when the puck is far from the away striker.
         if state.awayBoost.phase == .ready {
             let distance = (puck - away).length
-            if distance > config.rinkSize.y * 0.35 {
+            if distance > config.rinkSize.y * config.cpuBehavior.boostDistanceThresholdFraction {
                 return .boost
             }
         }

@@ -1556,4 +1556,194 @@ struct PuckClashTests {
             $0.awayBlock.phase != .ready || $0.awayShot.phase != .ready || $0.awayBoost.phase != .ready
         })
     }
+
+    // MARK: - CPU difficulty
+
+    // Same 100x200 board as the CPU decision tests. Contact ranges by difficulty:
+    // easy 10+5+5*0.75 = 18.75, normal 22.5, hard 25. Boost thresholds: easy 90,
+    // normal 70, hard 56. Shield line stays at y = 180.
+
+    private func config(_ difficulty: CPUDifficulty) -> MatchConfig {
+        config.withCPUBehavior(difficulty.behavior)
+    }
+
+    @Test func normalPresetMatchesOriginalCPUValues() {
+        // These are the values GameEngine hardcoded before difficulty existed; Normal
+        // must keep them exactly so the default behaviour is unchanged.
+        let normal = CPUBehaviorConfig.normal
+        #expect(normal.decisionInterval == 0.15)
+        #expect(normal.blockReactionWindow == 0.30)
+        #expect(normal.shotContactMarginScale == 1.5)
+        #expect(normal.boostDistanceThresholdFraction == 0.35)
+        // Configs that never mention a difficulty default to Normal.
+        #expect(MatchConfig.standard.cpuBehavior == .normal)
+        #expect(config.cpuBehavior == .normal)
+    }
+
+    @Test func difficultyPresetsHoldTheirValues() {
+        let easy = CPUBehaviorConfig.easy
+        #expect(easy.decisionInterval == 0.30)
+        #expect(easy.blockReactionWindow == 0.18)
+        #expect(easy.shotContactMarginScale == 0.75)
+        #expect(easy.boostDistanceThresholdFraction == 0.45)
+
+        let hard = CPUBehaviorConfig.hard
+        #expect(hard.decisionInterval == 0.10)
+        #expect(hard.blockReactionWindow == 0.38)
+        #expect(hard.shotContactMarginScale == 2.0)
+        #expect(hard.boostDistanceThresholdFraction == 0.28)
+
+        #expect(CPUDifficulty.easy.behavior == .easy)
+        #expect(CPUDifficulty.normal.behavior == .normal)
+        #expect(CPUDifficulty.hard.behavior == .hard)
+    }
+
+    @Test func easyDecidesSlowerAndHardFasterThanNormal() {
+        #expect(CPUBehaviorConfig.easy.decisionInterval > CPUBehaviorConfig.normal.decisionInterval)
+        #expect(CPUBehaviorConfig.hard.decisionInterval < CPUBehaviorConfig.normal.decisionInterval)
+    }
+
+    @Test func withCPUBehaviorOnlyReplacesCPUBehavior() {
+        for map in MapDefinition.all {
+            let hardConfig = map.config.withCPUBehavior(.hard)
+            #expect(hardConfig.cpuBehavior == .hard)
+            // Round-tripping back to Normal restores the original config exactly, so
+            // geometry, physics and skill values are untouched by difficulty.
+            #expect(hardConfig.withCPUBehavior(.normal) == map.config)
+        }
+    }
+
+    @Test func decisionTimerResetsToConfiguredInterval() {
+        var state = GameState.initial(config: config(.easy))
+        state.puck.position = Vector2(x: 50, y: 120) // no skill condition holds
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.001, inputs: [])
+
+        #expect(engine.state.awaySkillDecisionRemaining == 0.30)
+    }
+
+    @Test func blockReactionWindowFollowsDifficulty() {
+        // timeToShield = (180 - 150) / 120 = 0.25s: inside Normal's 0.30 window,
+        // outside Easy's 0.18.
+        func stateWithIncomingPuck(_ difficulty: CPUDifficulty) -> GameState {
+            var state = GameState.initial(config: config(difficulty))
+            state.awayPlayer.position = Vector2(x: 10, y: 190) // out of the puck's path
+            state.puck.position = Vector2(x: 50, y: 150)
+            state.puck.velocity = Vector2(x: 0, y: 120)
+            return state
+        }
+
+        var normalEngine = GameEngine(state: stateWithIncomingPuck(.normal))
+        normalEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(normalEngine.state.awayBlock.phase == .active)
+
+        var easyEngine = GameEngine(state: stateWithIncomingPuck(.easy))
+        easyEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(easyEngine.state.awayBlock.phase == .ready)
+    }
+
+    @Test func shotContactMarginFollowsDifficulty() {
+        // Striker at (50,160), puck at (50,140): distance 20 is inside Normal's 22.5
+        // contact range but outside Easy's 18.75.
+        func stateWithNearPuck(_ difficulty: CPUDifficulty) -> GameState {
+            var state = GameState.initial(config: config(difficulty))
+            state.puck.position = Vector2(x: 50, y: 140)
+            state.puck.velocity = .zero
+            return state
+        }
+
+        var normalEngine = GameEngine(state: stateWithNearPuck(.normal))
+        normalEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(normalEngine.state.awayShot.phase == .active)
+
+        var easyEngine = GameEngine(state: stateWithNearPuck(.easy))
+        easyEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(easyEngine.state.awayShot.phase == .ready)
+    }
+
+    @Test func boostThresholdFollowsDifficulty() {
+        // Striker at (50,160), puck at (50,100): distance 60 is over Hard's 56
+        // threshold but under Normal's 70 (and over Shot contact range for both).
+        func stateWithMidPuck(_ difficulty: CPUDifficulty) -> GameState {
+            var state = GameState.initial(config: config(difficulty))
+            state.puck.position = Vector2(x: 50, y: 100)
+            state.puck.velocity = .zero
+            return state
+        }
+
+        var hardEngine = GameEngine(state: stateWithMidPuck(.hard))
+        hardEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(hardEngine.state.awayBoost.phase == .active)
+
+        var normalEngine = GameEngine(state: stateWithMidPuck(.normal))
+        normalEngine.update(deltaTime: 0.001, inputs: [])
+        #expect(normalEngine.state.awayBoost.phase == .ready)
+    }
+
+    @Test func hardDifficultySimulationIsDeterministic() {
+        var initial = GameState.initial(config: config(.hard))
+        initial.puck.position = Vector2(x: 40, y: 150)
+        initial.puck.velocity = Vector2(x: 20, y: 120)
+        let deltas: [Double] = [0.02, 0.05, 0.10, 0.02, 0.15, 0.05, 0.10, 0.02, 0.10, 0.05]
+
+        func run() -> [GameState] {
+            var engine = GameEngine(state: initial)
+            var states: [GameState] = []
+            for dt in deltas {
+                engine.update(deltaTime: dt, inputs: [])
+                states.append(engine.state)
+            }
+            return states
+        }
+
+        let first = run()
+        let second = run()
+        #expect(first == second)
+        #expect(first.contains {
+            $0.awayBlock.phase != .ready || $0.awayShot.phase != .ready || $0.awayBoost.phase != .ready
+        })
+    }
+
+    @Test func strictBuzzerHoldsAtAnyDifficulty() {
+        var state = GameState.initial(config: config(.hard))
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition would hold
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 12, inputs: []) // matchDuration 10 -> buzzer frame
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.awaySkillDecisionRemaining == 0)
+        #expect(engine.state.awayBlock.phase == .ready)
+    }
+
+    @Test func explicitAwayInputBypassesCPUAtAnyDifficulty() {
+        var state = GameState.initial(config: config(.hard))
+        state.awayPlayer.position = Vector2(x: 10, y: 190)
+        state.puck.position = Vector2(x: 50, y: 150)
+        state.puck.velocity = Vector2(x: 0, y: 200) // Block condition would hold for the CPU
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 10, y: 190), timestamp: 1)]
+        )
+
+        #expect(engine.state.awayBlock.phase == .ready)
+        #expect(engine.state.awaySkillDecisionRemaining == 0)
+    }
+
+    @Test func homeSkillsAreUnaffectedByDifficulty() {
+        var engine = GameEngine(state: .initial(config: config(.hard)))
+
+        engine.update(
+            deltaTime: 0.001,
+            inputs: [PlayerInput(playerId: .home, activatedSkills: [.boost])]
+        )
+
+        // Home activation still works and uses the shared (unchanged) skill values.
+        #expect(engine.state.homeBoost.phase == .active)
+        #expect(abs(engine.state.homeBoost.activeRemaining - (config.boost.duration - 0.001)) < 1e-9)
+    }
 }
