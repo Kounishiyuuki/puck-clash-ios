@@ -49,6 +49,12 @@ struct MatchHUD: Equatable {
     var homeScore = 0
     var awayScore = 0
     var remainingSeconds = 0
+    // Match flow published by GameCore: countdown/goalPause drive the overlays and
+    // input gating. Coarse whole seconds keep the publish rate low. Defaults match a
+    // freshly created match (opening countdown) so controls start disabled.
+    var matchPhase: MatchPhase = .countdown
+    var phaseRemainingSeconds = 0
+    var lastScorer: PlayerSide? = nil
     var boostPhase: SkillPhase = .ready
     var boostRemainingSeconds = 0
     var shotPhase: SkillPhase = .ready
@@ -63,6 +69,10 @@ final class MatchController: ObservableObject {
     let session: LocalMatchSession
     let scene: RinkScene
     @Published var hud = MatchHUD()
+    // App-level pause (player button or app going inactive). GameCore has no paused
+    // state: the scene simply stops advancing the session while this is true, so
+    // every simulation timer freezes together and resume continues exactly in place.
+    @Published private(set) var isPaused = false
 
     init(config: MatchConfig, onFinished: @escaping (ScoreState) -> Void) {
         let session = LocalMatchSession(config: config)
@@ -94,6 +104,21 @@ final class MatchController: ObservableObject {
     // does not re-render SwiftUI every frame. The session treats zero as no input.
     func setMoveVector(_ vector: Vector2) {
         session.setHomeInput(moveVector: vector)
+    }
+
+    func pause() {
+        guard !isPaused else {
+            return
+        }
+        isPaused = true
+        scene.isMatchPaused = true
+        // Drop any held joystick input so resuming never replays a stale vector.
+        session.setHomeInput(moveVector: nil)
+    }
+
+    func resume() {
+        isPaused = false
+        scene.isMatchPaused = false
     }
 }
 
@@ -153,7 +178,8 @@ struct ContentView: View {
             MatchView(
                 map: map,
                 difficulty: difficulty,
-                onFinished: { score in flow = .result(score, map, difficulty) }
+                onFinished: { score in flow = .result(score, map, difficulty) },
+                onQuit: { flow = .start }
             )
             .id(matchID)
         case .result(let score, let map, let difficulty):
@@ -365,21 +391,72 @@ private struct SelectionCard: View {
 
 struct MatchView: View {
     @StateObject private var controller: MatchController
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var confirmingQuit = false
+    private let onQuit: () -> Void
 
-    init(map: MapDefinition, difficulty: CPUDifficulty, onFinished: @escaping (ScoreState) -> Void) {
+    init(
+        map: MapDefinition,
+        difficulty: CPUDifficulty,
+        onFinished: @escaping (ScoreState) -> Void,
+        onQuit: @escaping () -> Void
+    ) {
         _controller = StateObject(
             wrappedValue: MatchController(
                 config: map.config.withCPUBehavior(difficulty.behavior),
                 onFinished: onFinished
             )
         )
+        self.onQuit = onQuit
+    }
+
+    // Player input is only meaningful while the match is actually playing: the
+    // GameCore phase is running and the app-level pause is off. Everything else
+    // (countdown, goal pause, paused, finished) shows disabled controls.
+    private var controlsEnabled: Bool {
+        controller.hud.matchPhase == .running && !controller.isPaused
     }
 
     var body: some View {
         ZStack {
             ArenaBackground()
             RinkSceneView(scene: controller.scene)
+
+            if !controller.isPaused {
+                if controller.hud.matchPhase == .countdown {
+                    CountdownOverlay(seconds: controller.hud.phaseRemainingSeconds)
+                } else if controller.hud.matchPhase == .goalPause, let scorer = controller.hud.lastScorer {
+                    GoalOverlay(scorer: scorer)
+                }
+            }
+
+            if controller.isPaused {
+                PauseOverlay(
+                    confirmingQuit: confirmingQuit,
+                    onResume: { controller.resume() },
+                    onQuitRequest: { confirmingQuit = true },
+                    onQuitConfirm: onQuit,
+                    onQuitCancel: { confirmingQuit = false }
+                )
+            }
         }
+        .overlay(alignment: .topTrailing) {
+            if !controller.isPaused {
+                Button(action: { controller.pause() }) {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 38, height: 38)
+                        .background(.white.opacity(0.1), in: Circle())
+                }
+                .accessibilityIdentifier("pause-match-button")
+                .accessibilityLabel("一時停止")
+                .padding(.trailing, 14)
+                .padding(.top, 4)
+            }
+        }
+        .animation(.snappy(duration: 0.2), value: controller.hud.phaseRemainingSeconds)
+        .animation(.snappy(duration: 0.2), value: controller.hud.matchPhase)
         .safeAreaInset(edge: .top) {
             MatchHUDBar(hud: controller.hud)
         }
@@ -396,7 +473,115 @@ struct MatchView: View {
                 blockRemainingSeconds: controller.hud.blockRemainingSeconds,
                 onBlock: { controller.activateBlock() }
             )
+            .disabled(!controlsEnabled)
+            .opacity(controlsEnabled ? 1 : 0.45)
         }
+        .onChange(of: controlsEnabled) { _, enabled in
+            // Gating can flip mid-drag; make sure no stale joystick vector survives.
+            if !enabled {
+                controller.setMoveVector(.zero)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Leaving the foreground pauses the match; the player resumes manually.
+            if newPhase != .active {
+                controller.pause()
+            }
+        }
+    }
+}
+
+// The 3-2-1 opening countdown, driven by the GameCore phase timer (no SwiftUI
+// timers). Hit testing stays off so it never swallows input.
+private struct CountdownOverlay: View {
+    let seconds: Int
+
+    var body: some View {
+        Text("\(max(1, seconds))")
+            .font(.system(size: 120, weight: .heavy, design: .rounded))
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.6), radius: 14)
+            .accessibilityIdentifier("match-countdown-overlay")
+            .id(seconds) // re-enter the transition on every displayed second
+            .transition(.scale(scale: 1.4).combined(with: .opacity))
+            .allowsHitTesting(false)
+    }
+}
+
+// Short banner during the goal pause, attributed by GameCore's lastScorer.
+private struct GoalOverlay: View {
+    let scorer: PlayerSide
+
+    var body: some View {
+        Text(scorer == .home ? "GOAL!" : "CPU SCORE")
+            .font(.system(size: 48, weight: .heavy, design: .rounded))
+            .foregroundStyle(scorer == .home ? Palette.home : Palette.away)
+            .shadow(color: .black.opacity(0.7), radius: 10)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 12)
+            .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 18))
+            .accessibilityIdentifier("goal-pause-overlay")
+            .transition(.scale(scale: 0.8).combined(with: .opacity))
+            .allowsHitTesting(false)
+    }
+}
+
+// Full-screen pause menu. Quitting asks for confirmation first; the match state is
+// simply discarded (no result, no persistence).
+private struct PauseOverlay: View {
+    let confirmingQuit: Bool
+    let onResume: () -> Void
+    let onQuitRequest: () -> Void
+    let onQuitConfirm: () -> Void
+    let onQuitCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                if confirmingQuit {
+                    Text("タイトルへ戻りますか？")
+                        .font(.title2.weight(.heavy))
+                        .foregroundStyle(.white)
+                    Text("進行中の試合は保存されません")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                    primaryButton("タイトルへ戻る", identifier: "quit-confirm-button", action: onQuitConfirm)
+                    secondaryButton("キャンセル", identifier: "quit-cancel-button", action: onQuitCancel)
+                } else {
+                    Text("一時停止")
+                        .font(.title.weight(.heavy))
+                        .foregroundStyle(.white)
+                        .accessibilityIdentifier("pause-overlay")
+                    primaryButton("再開", identifier: "resume-match-button", action: onResume)
+                    secondaryButton("タイトルへ戻る", identifier: "quit-match-button", action: onQuitRequest)
+                }
+            }
+            .padding(28)
+        }
+    }
+
+    private func primaryButton(_ title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.title3.weight(.bold))
+                .frame(maxWidth: 240)
+                .padding(.vertical, 14)
+                .background(Palette.home, in: RoundedRectangle(cornerRadius: 14))
+                .foregroundStyle(.white)
+        }
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func secondaryButton(_ title: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .accessibilityIdentifier(identifier)
     }
 }
 
