@@ -1326,11 +1326,11 @@ struct PuckClashTests {
 
     // MARK: - Away CPU skill decisions
 
-    // With the test config: away shield line y = 200 - puckRadius*4 = 180; goal mouth
-    // x in [30, 70]; Shot contact range = 10 + 5 + 5*1.5 = 22.5; Boost far threshold =
-    // 200 * 0.35 = 70. awaySkillDecisionRemaining starts at 0, so the first CPU-driven
-    // update is a decision tick. deltaTime 0.001 keeps strikers from reaching the puck
-    // within the asserted tick.
+    // With the test config (Normal CPU): away shield line y = 200 - puckRadius*4 = 180;
+    // goal mouth x in [30, 70]; Shot contact range = 10 + 5 + 5*1.35 = 21.75; Boost far
+    // threshold = 200 * 0.38 = 76; Block reaction window 0.27s. awaySkillDecisionRemaining
+    // starts at 0, so the first CPU-driven update is a decision tick. deltaTime 0.001
+    // keeps strikers from reaching the puck within the asserted tick.
 
     @Test func cpuBlockActivatesAgainstPuckAimedAtTopGoalMouth() {
         var state = GameState.initial(config: config)
@@ -1389,7 +1389,7 @@ struct PuckClashTests {
 
     @Test func cpuShotActivatesWhenPuckCloseAndBelowStriker() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 140) // distance 20 <= 22.5, striker above
+        state.puck.position = Vector2(x: 50, y: 140) // distance 20 <= 21.75, striker above
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1402,7 +1402,7 @@ struct PuckClashTests {
 
     @Test func cpuShotDoesNotActivateWhenPuckFar() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 100) // distance 60 > 22.5 (and <= 70: no Boost)
+        state.puck.position = Vector2(x: 50, y: 100) // distance 60 > 21.75 (and <= 76: no Boost)
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1414,7 +1414,7 @@ struct PuckClashTests {
 
     @Test func cpuShotDoesNotActivateWhenStrikerBelowPuck() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 178) // distance 18 <= 22.5 but puck is above
+        state.puck.position = Vector2(x: 50, y: 178) // distance 18 <= 21.75 but puck is above
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1427,7 +1427,7 @@ struct PuckClashTests {
 
     @Test func cpuBoostActivatesWhenPuckFarFromStriker() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 85) // distance 75 > 70
+        state.puck.position = Vector2(x: 50, y: 80) // distance 80 > 76
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1440,7 +1440,7 @@ struct PuckClashTests {
 
     @Test func cpuBoostDoesNotActivateWhenPuckNear() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 120) // distance 40 <= 70
+        state.puck.position = Vector2(x: 50, y: 120) // distance 40 <= 76
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1514,12 +1514,12 @@ struct PuckClashTests {
         // Timer reaches zero: the decision runs, Block fires, timer resets to the interval.
         engine.update(deltaTime: 0.01, inputs: [])
         #expect(engine.state.awayBlock.phase == .active)
-        #expect(engine.state.awaySkillDecisionRemaining == 0.15)
+        #expect(engine.state.awaySkillDecisionRemaining == 0.18)
     }
 
     @Test func cpuCatchUpRunsSingleDecision() {
         var state = GameState.initial(config: config)
-        state.puck.position = Vector2(x: 50, y: 85) // Boost condition (distance 75 > 70)
+        state.puck.position = Vector2(x: 50, y: 80) // Boost condition (distance 80 > 76)
         state.puck.velocity = .zero
         var engine = GameEngine(state: state)
 
@@ -1528,7 +1528,7 @@ struct PuckClashTests {
         engine.update(deltaTime: 0.5, inputs: [])
 
         #expect(engine.state.awayBoost.phase == .active)
-        #expect(engine.state.awaySkillDecisionRemaining == 0.15)
+        #expect(engine.state.awaySkillDecisionRemaining == 0.18)
         // Home skills are untouched by the CPU decision.
         #expect(engine.state.homeBoost.phase == .ready)
         #expect(engine.state.homeShot.phase == .ready)
@@ -1585,21 +1585,21 @@ struct PuckClashTests {
     // MARK: - CPU difficulty
 
     // Same 100x200 board as the CPU decision tests. Contact ranges by difficulty:
-    // easy 10+5+5*0.75 = 18.75, normal 22.5, hard 25. Boost thresholds: easy 90,
-    // normal 70, hard 56. Shield line stays at y = 180.
+    // easy 10+5+5*0.70 = 18.5, normal 21.75, hard 24. Boost thresholds: easy 96,
+    // normal 76, hard 62. Shield line stays at y = 180.
 
     private func config(_ difficulty: CPUDifficulty) -> MatchConfig {
         config.withCPUBehavior(difficulty.behavior)
     }
 
-    @Test func normalPresetMatchesOriginalCPUValues() {
-        // These are the values GameEngine hardcoded before difficulty existed; Normal
-        // must keep them exactly so the default behaviour is unchanged.
+    @Test func normalPresetHoldsItsTunedValues() {
+        // The rebalanced Normal: slightly softer than the original hardcoded engine
+        // values so the default CPU is less relentless.
         let normal = CPUBehaviorConfig.normal
-        #expect(normal.decisionInterval == 0.15)
-        #expect(normal.blockReactionWindow == 0.30)
-        #expect(normal.shotContactMarginScale == 1.5)
-        #expect(normal.boostDistanceThresholdFraction == 0.35)
+        #expect(normal.decisionInterval == 0.18)
+        #expect(normal.blockReactionWindow == 0.27)
+        #expect(normal.shotContactMarginScale == 1.35)
+        #expect(normal.boostDistanceThresholdFraction == 0.38)
         // Configs that never mention a difficulty default to Normal.
         #expect(MatchConfig.standard.cpuBehavior == .normal)
         #expect(config.cpuBehavior == .normal)
@@ -1607,16 +1607,16 @@ struct PuckClashTests {
 
     @Test func difficultyPresetsHoldTheirValues() {
         let easy = CPUBehaviorConfig.easy
-        #expect(easy.decisionInterval == 0.30)
-        #expect(easy.blockReactionWindow == 0.18)
-        #expect(easy.shotContactMarginScale == 0.75)
-        #expect(easy.boostDistanceThresholdFraction == 0.45)
+        #expect(easy.decisionInterval == 0.35)
+        #expect(easy.blockReactionWindow == 0.16)
+        #expect(easy.shotContactMarginScale == 0.70)
+        #expect(easy.boostDistanceThresholdFraction == 0.48)
 
         let hard = CPUBehaviorConfig.hard
-        #expect(hard.decisionInterval == 0.10)
-        #expect(hard.blockReactionWindow == 0.38)
-        #expect(hard.shotContactMarginScale == 2.0)
-        #expect(hard.boostDistanceThresholdFraction == 0.28)
+        #expect(hard.decisionInterval == 0.12)
+        #expect(hard.blockReactionWindow == 0.34)
+        #expect(hard.shotContactMarginScale == 1.80)
+        #expect(hard.boostDistanceThresholdFraction == 0.31)
 
         #expect(CPUDifficulty.easy.behavior == .easy)
         #expect(CPUDifficulty.normal.behavior == .normal)
@@ -1645,12 +1645,12 @@ struct PuckClashTests {
 
         engine.update(deltaTime: 0.001, inputs: [])
 
-        #expect(engine.state.awaySkillDecisionRemaining == 0.30)
+        #expect(engine.state.awaySkillDecisionRemaining == 0.35)
     }
 
     @Test func blockReactionWindowFollowsDifficulty() {
-        // timeToShield = (180 - 150) / 120 = 0.25s: inside Normal's 0.30 window,
-        // outside Easy's 0.18.
+        // timeToShield = (180 - 150) / 120 = 0.25s: inside Normal's 0.27 window,
+        // outside Easy's 0.16.
         func stateWithIncomingPuck(_ difficulty: CPUDifficulty) -> GameState {
             var state = GameState.initial(config: config(difficulty))
             state.awayPlayer.position = Vector2(x: 10, y: 190) // out of the puck's path
@@ -1669,8 +1669,8 @@ struct PuckClashTests {
     }
 
     @Test func shotContactMarginFollowsDifficulty() {
-        // Striker at (50,160), puck at (50,140): distance 20 is inside Normal's 22.5
-        // contact range but outside Easy's 18.75.
+        // Striker at (50,160), puck at (50,140): distance 20 is inside Normal's 21.75
+        // contact range but outside Easy's 18.5.
         func stateWithNearPuck(_ difficulty: CPUDifficulty) -> GameState {
             var state = GameState.initial(config: config(difficulty))
             state.puck.position = Vector2(x: 50, y: 140)
@@ -1688,11 +1688,11 @@ struct PuckClashTests {
     }
 
     @Test func boostThresholdFollowsDifficulty() {
-        // Striker at (50,160), puck at (50,100): distance 60 is over Hard's 56
-        // threshold but under Normal's 70 (and over Shot contact range for both).
+        // Striker at (50,160), puck at (50,90): distance 70 is over Hard's 62
+        // threshold but under Normal's 76 (and over Shot contact range for both).
         func stateWithMidPuck(_ difficulty: CPUDifficulty) -> GameState {
             var state = GameState.initial(config: config(difficulty))
-            state.puck.position = Vector2(x: 50, y: 100)
+            state.puck.position = Vector2(x: 50, y: 90)
             state.puck.velocity = .zero
             return state
         }
@@ -2041,5 +2041,113 @@ struct PuckClashTests {
             session.advance(deltaTime: fixedDelta)
         }
         #expect(session.state.phase == .running)
+    }
+
+    // MARK: - Striker speed scales
+
+    @Test func speedScalesDefaultToOne() {
+        #expect(config.homeStrikerSpeedScale == 1.0)
+        #expect(config.awayStrikerSpeedScale == 1.0)
+        #expect(MatchConfig.standard.homeStrikerSpeedScale == 1.0)
+        #expect(MatchConfig.standard.awayStrikerSpeedScale == 1.0)
+    }
+
+    @Test func homeSpeedScaleSpeedsUpOnlyHome() {
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.0)
+        var baseEngine = GameEngine(state: .initial(config: config))
+        var scaledEngine = GameEngine(state: .initial(config: scaled))
+        let inputs = [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0))]
+
+        baseEngine.update(deltaTime: 0.01, inputs: inputs)
+        scaledEngine.update(deltaTime: 0.01, inputs: inputs)
+
+        let baseDX = baseEngine.state.homePlayer.position.x - config.homeStartPosition.x
+        let scaledDX = scaledEngine.state.homePlayer.position.x - config.homeStartPosition.x
+        #expect(abs(baseDX - 1000 * 0.01) < 1e-9)
+        #expect(abs(scaledDX - 1000 * 1.12 * 0.01) < 1e-9)
+        // The away (CPU-driven) side is byte-identical to the unscaled run.
+        #expect(scaledEngine.state.awayPlayer == baseEngine.state.awayPlayer)
+    }
+
+    @Test func symmetricScalesMoveBothSidesEqually() {
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.12)
+        var engine = GameEngine(state: .initial(config: scaled))
+
+        engine.update(
+            deltaTime: 0.01,
+            inputs: [
+                PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0)),
+                PlayerInput(playerId: .away, moveVector: Vector2(x: 1, y: 0), timestamp: 1)
+            ]
+        )
+
+        let homeDX = engine.state.homePlayer.position.x - scaled.homeStartPosition.x
+        let awayDX = engine.state.awayPlayer.position.x - scaled.awayStartPosition.x
+        #expect(abs(homeDX - awayDX) < 1e-9)
+        #expect(abs(homeDX - 1000 * 1.12 * 0.01) < 1e-9)
+    }
+
+    @Test func boostMultipliesTheScaledSideSpeed() {
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.0)
+        var state = GameState.initial(config: scaled)
+        state.homeBoost = SkillState(activeRemaining: 1.0, cooldownRemaining: 0)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.01, inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0))])
+
+        // Boost multiplies the side's resolved (scaled) speed — applied once, not twice.
+        let dx = engine.state.homePlayer.position.x - scaled.homeStartPosition.x
+        #expect(abs(dx - 1000 * 1.12 * 1.6 * 0.01) < 1e-9)
+    }
+
+    @Test func speedScalesLeaveThePuckAlone() {
+        func puckAfterRun(_ cfg: MatchConfig) -> PuckState {
+            var state = GameState.initial(config: cfg)
+            state.puck.velocity = Vector2(x: 30, y: 40)
+            var engine = GameEngine(state: state)
+            for _ in 0..<10 {
+                engine.update(
+                    deltaTime: 0.01,
+                    inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 90, y: 190), timestamp: 1)]
+                )
+            }
+            return engine.state.puck
+        }
+
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.12)
+        #expect(puckAfterRun(config) == puckAfterRun(scaled))
+    }
+
+    @Test func withStrikerSpeedScalesKeepsEverythingElse() {
+        for map in MapDefinition.all {
+            let scaled = map.config.withStrikerSpeedScales(home: 1.12, away: 1.0)
+            #expect(scaled.strikerMaxSpeed == map.config.strikerMaxSpeed)
+            #expect(scaled.homeStrikerSpeedScale == 1.12)
+            #expect(scaled.awayStrikerSpeedScale == 1.0)
+            // Round-tripping back to 1.0 restores the map config exactly.
+            #expect(scaled.withStrikerSpeedScales(home: 1.0, away: 1.0) == map.config)
+        }
+    }
+
+    @Test func scaledSimulationIsDeterministic() {
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.0)
+        var initial = GameState.initial(config: scaled)
+        initial.puck.velocity = Vector2(x: 25, y: 130)
+        let deltas: [Double] = [0.02, 0.05, 0.10, 0.02, 0.15, 0.05, 0.10, 0.02, 0.10, 0.05]
+
+        func run() -> [GameState] {
+            var engine = GameEngine(state: initial)
+            var states: [GameState] = []
+            for dt in deltas {
+                engine.update(
+                    deltaTime: dt,
+                    inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 0.4, y: 0.8))]
+                )
+                states.append(engine.state)
+            }
+            return states
+        }
+
+        #expect(run() == run())
     }
 }

@@ -122,6 +122,13 @@ final class MatchController: ObservableObject {
     }
 }
 
+// Human-controlled strikers get a small speed edge over the map's base speed so a
+// player can realistically keep up with the puck. Applied where a match config is
+// built (never a GameCore global): CPU practice scales only the human home side;
+// a mode with two human sides applies it to both, and a future remote opponent
+// would use the same value for their side.
+private let humanControlSpeedScale = 1.12
+
 private enum Palette {
     static let backgroundTop = Color(red: 0.06, green: 0.10, blue: 0.17)
     static let backgroundBottom = Color(red: 0.02, green: 0.04, blue: 0.08)
@@ -403,7 +410,9 @@ struct MatchView: View {
     ) {
         _controller = StateObject(
             wrappedValue: MatchController(
-                config: map.config.withCPUBehavior(difficulty.behavior),
+                config: map.config
+                    .withCPUBehavior(difficulty.behavior)
+                    .withStrikerSpeedScales(home: humanControlSpeedScale, away: 1.0),
                 onFinished: onFinished
             )
         )

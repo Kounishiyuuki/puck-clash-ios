@@ -154,26 +154,26 @@ struct CPUBehaviorConfig: Equatable {
     var boostDistanceThresholdFraction: Double
 
     static let easy = CPUBehaviorConfig(
-        decisionInterval: 0.30,
-        blockReactionWindow: 0.18,
-        shotContactMarginScale: 0.75,
-        boostDistanceThresholdFraction: 0.45
+        decisionInterval: 0.35,
+        blockReactionWindow: 0.16,
+        shotContactMarginScale: 0.70,
+        boostDistanceThresholdFraction: 0.48
     )
 
-    // Matches the values the engine originally hardcoded, so Normal is the
-    // unchanged baseline behaviour.
+    // The default. Softened slightly from the original hardcoded engine values
+    // (0.15 / 0.30 / 1.50 / 0.35) so the standard CPU feels less relentless.
     static let normal = CPUBehaviorConfig(
-        decisionInterval: 0.15,
-        blockReactionWindow: 0.30,
-        shotContactMarginScale: 1.50,
-        boostDistanceThresholdFraction: 0.35
+        decisionInterval: 0.18,
+        blockReactionWindow: 0.27,
+        shotContactMarginScale: 1.35,
+        boostDistanceThresholdFraction: 0.38
     )
 
     static let hard = CPUBehaviorConfig(
-        decisionInterval: 0.10,
-        blockReactionWindow: 0.38,
-        shotContactMarginScale: 2.00,
-        boostDistanceThresholdFraction: 0.28
+        decisionInterval: 0.12,
+        blockReactionWindow: 0.34,
+        shotContactMarginScale: 1.80,
+        boostDistanceThresholdFraction: 0.31
     )
 }
 
@@ -210,6 +210,11 @@ struct MatchConfig: Equatable {
     // Freeze after each goal before play resumes. 0 disables it (scoring keeps the
     // match running, the pre-phase behaviour).
     let goalPauseDuration: TimeInterval
+    // Per-side striker speed multipliers on strikerMaxSpeed (1.0 = the map's base
+    // speed). Sides are all GameCore knows: who drives each side (human, CPU,
+    // remote player) is decided by whoever builds the config.
+    let homeStrikerSpeedScale: Double
+    let awayStrikerSpeedScale: Double
 
     init(
         rinkSize: Vector2,
@@ -228,7 +233,9 @@ struct MatchConfig: Equatable {
         block: BlockConfig = BlockConfig(),
         cpuBehavior: CPUBehaviorConfig = .normal,
         openingCountdownDuration: TimeInterval = 3.0,
-        goalPauseDuration: TimeInterval = 1.0
+        goalPauseDuration: TimeInterval = 1.0,
+        homeStrikerSpeedScale: Double = 1.0,
+        awayStrikerSpeedScale: Double = 1.0
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -247,6 +254,34 @@ struct MatchConfig: Equatable {
         self.cpuBehavior = cpuBehavior
         self.openingCountdownDuration = openingCountdownDuration
         self.goalPauseDuration = goalPauseDuration
+        self.homeStrikerSpeedScale = homeStrikerSpeedScale
+        self.awayStrikerSpeedScale = awayStrikerSpeedScale
+    }
+
+    // The same match with per-side striker speed multipliers replaced; everything
+    // else (map geometry, physics, skills, CPU behaviour) is untouched.
+    func withStrikerSpeedScales(home: Double, away: Double) -> MatchConfig {
+        MatchConfig(
+            rinkSize: rinkSize,
+            matchDuration: matchDuration,
+            strikerMaxSpeed: strikerMaxSpeed,
+            goalMouthHalfWidth: goalMouthHalfWidth,
+            strikerRadius: strikerRadius,
+            puckRadius: puckRadius,
+            strikerHitRestitution: strikerHitRestitution,
+            wallRestitution: wallRestitution,
+            puckDamping: puckDamping,
+            puckStopSpeed: puckStopSpeed,
+            tickRate: tickRate,
+            boost: boost,
+            shot: shot,
+            block: block,
+            cpuBehavior: cpuBehavior,
+            openingCountdownDuration: openingCountdownDuration,
+            goalPauseDuration: goalPauseDuration,
+            homeStrikerSpeedScale: home,
+            awayStrikerSpeedScale: away
+        )
     }
 
     // The same match tuned for a CPU difficulty: geometry, physics and skill values
@@ -269,7 +304,9 @@ struct MatchConfig: Equatable {
             block: block,
             cpuBehavior: cpuBehavior,
             openingCountdownDuration: openingCountdownDuration,
-            goalPauseDuration: goalPauseDuration
+            goalPauseDuration: goalPauseDuration,
+            homeStrikerSpeedScale: homeStrikerSpeedScale,
+            awayStrikerSpeedScale: awayStrikerSpeedScale
         )
     }
 

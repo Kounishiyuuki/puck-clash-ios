@@ -64,14 +64,14 @@ struct GameEngine {
             state.homePlayer,
             moveVector: homeInput?.moveVector,
             target: homeInput?.targetPosition,
-            maxSpeed: effectiveStrikerSpeed(boost: state.homeBoost),
+            maxSpeed: effectiveStrikerSpeed(boost: state.homeBoost, sideScale: state.config.homeStrikerSpeedScale),
             deltaTime: deltaTime
         )
         state.awayPlayer = movedStriker(
             state.awayPlayer,
             moveVector: awayInput.moveVector,
             target: awayInput.targetPosition,
-            maxSpeed: effectiveStrikerSpeed(boost: state.awayBoost),
+            maxSpeed: effectiveStrikerSpeed(boost: state.awayBoost, sideScale: state.config.awayStrikerSpeedScale),
             deltaTime: deltaTime
         )
 
@@ -102,10 +102,11 @@ struct GameEngine {
         return updated
     }
 
-    // The striker's max speed, scaled by the boost multiplier while its effect is active.
-    private func effectiveStrikerSpeed(boost: SkillState) -> Double {
+    // The striker's max speed: the map's base speed times the side's configured
+    // scale, times the boost multiplier while its effect is active.
+    private func effectiveStrikerSpeed(boost: SkillState, sideScale: Double) -> Double {
         let multiplier = boost.activeRemaining > 0 ? state.config.boost.speedMultiplier : 1
-        return state.config.strikerMaxSpeed * multiplier
+        return state.config.strikerMaxSpeed * sideScale * multiplier
     }
 
     // Count down the active window, then (once it ends) the cooldown, back to ready.
