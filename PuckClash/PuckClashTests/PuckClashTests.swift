@@ -21,7 +21,11 @@ struct PuckClashTests {
         strikerHitRestitution: 1.0,
         wallRestitution: 1.0,
         puckDamping: 1.0,
-        puckStopSpeed: 0
+        puckStopSpeed: 0,
+        // Phase-less: the engine tests below exercise the running match directly.
+        // The match-phase tests use phaseConfig instead.
+        openingCountdownDuration: 0,
+        goalPauseDuration: 0
     )
 
     private var frictionConfig: MatchConfig {
@@ -33,7 +37,28 @@ struct PuckClashTests {
             strikerRadius: 10,
             puckRadius: 5,
             puckDamping: 0.25,
-            puckStopSpeed: 5
+            puckStopSpeed: 5,
+            openingCountdownDuration: 0,
+            goalPauseDuration: 0
+        )
+    }
+
+    // The same board as `config` but with the real match phases enabled
+    // (3s opening countdown, 1s goal pause) for the match-flow tests.
+    private var phaseConfig: MatchConfig {
+        MatchConfig(
+            rinkSize: Vector2(x: 100, y: 200),
+            matchDuration: 10,
+            strikerMaxSpeed: 1000,
+            goalMouthHalfWidth: 20,
+            strikerRadius: 10,
+            puckRadius: 5,
+            strikerHitRestitution: 1.0,
+            wallRestitution: 1.0,
+            puckDamping: 1.0,
+            puckStopSpeed: 0,
+            openingCountdownDuration: 3.0,
+            goalPauseDuration: 1.0
         )
     }
 
@@ -43,7 +68,7 @@ struct PuckClashTests {
         let state = GameState.initial(config: config)
 
         #expect(state.score == .zero)
-        #expect(state.phase == .ready)
+        #expect(state.phase == .running) // countdown disabled in this config
         #expect(state.remainingTime == 10)
         #expect(state.homePlayer.position == Vector2(x: 50, y: 40))
         #expect(state.awayPlayer.position == Vector2(x: 50, y: 160))
@@ -1745,5 +1770,276 @@ struct PuckClashTests {
         // Home activation still works and uses the shared (unchanged) skill values.
         #expect(engine.state.homeBoost.phase == .active)
         #expect(abs(engine.state.homeBoost.activeRemaining - (config.boost.duration - 0.001)) < 1e-9)
+    }
+
+    // MARK: - Match phases (opening countdown / goal pause)
+
+    // phaseConfig: 3s opening countdown, 1s goal pause, otherwise the same 100x200
+    // board. `config` keeps both at 0, so every other test runs the match directly.
+
+    // A phaseConfig state already past the countdown, for tests that start in play.
+    private func runningPhaseState() -> GameState {
+        var state = GameState.initial(config: phaseConfig)
+        state.phase = .running
+        state.phaseRemaining = 0
+        return state
+    }
+
+    @Test func initialStateStartsInOpeningCountdown() {
+        let state = GameState.initial(config: phaseConfig)
+        #expect(state.phase == .countdown)
+        #expect(state.phaseRemaining == 3.0)
+        #expect(state.remainingTime == 10)
+        #expect(state.score == .zero)
+        #expect(state.lastScorer == nil)
+    }
+
+    @Test func zeroCountdownConfigStartsRunning() {
+        let state = GameState.initial(config: config)
+        #expect(state.phase == .running)
+        #expect(state.phaseRemaining == 0)
+    }
+
+    @Test func countdownFreezesEverythingButItsOwnTimer() {
+        var state = GameState.initial(config: phaseConfig)
+        state.puck.velocity = Vector2(x: 40, y: 120)
+        state.homeBoost = SkillState(activeRemaining: 1.5, cooldownRemaining: 0)
+        state.awayShot = SkillState(activeRemaining: 0, cooldownRemaining: 2.0)
+        let frozen = state
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 1, y: 0), activatedSkills: [.shot])]
+        )
+
+        let after = engine.state
+        #expect(after.phase == .countdown)
+        #expect(abs(after.phaseRemaining - 2.9) < 1e-9)
+        // Clock, entities, skills and the CPU decision timer are all untouched.
+        #expect(after.remainingTime == frozen.remainingTime)
+        #expect(after.puck == frozen.puck)
+        #expect(after.homePlayer == frozen.homePlayer)
+        #expect(after.awayPlayer == frozen.awayPlayer)
+        #expect(after.homeBoost == frozen.homeBoost)
+        #expect(after.awayShot == frozen.awayShot)
+        #expect(after.homeShot.phase == .ready) // the activation request was ignored
+        #expect(after.awaySkillDecisionRemaining == frozen.awaySkillDecisionRemaining)
+    }
+
+    @Test func countdownEndStepDoesNotSimulate() {
+        var state = GameState.initial(config: phaseConfig)
+        state.puck.velocity = Vector2(x: 0, y: 100)
+        var engine = GameEngine(state: state)
+
+        // This step finishes the countdown; play resumes on the NEXT step.
+        engine.update(deltaTime: 3.0, inputs: [])
+        #expect(engine.state.phase == .running)
+        #expect(engine.state.phaseRemaining == 0)
+        #expect(engine.state.remainingTime == 10)
+        #expect(engine.state.puck.position == phaseConfig.rinkCenter)
+
+        // The next step runs the match normally.
+        engine.update(deltaTime: 0.1, inputs: [])
+        #expect(abs(engine.state.remainingTime - 9.9) < 1e-9)
+        #expect(engine.state.puck.position.y > phaseConfig.rinkCenter.y)
+    }
+
+    @Test func countdownOverrunDoesNotCarryIntoMatch() {
+        var engine = GameEngine(state: .initial(config: phaseConfig))
+
+        // One huge step past the countdown still only ends the phase; none of the
+        // excess time leaks into the match clock.
+        engine.update(deltaTime: 5.0, inputs: [])
+
+        #expect(engine.state.phase == .running)
+        #expect(engine.state.remainingTime == 10)
+    }
+
+    @Test func goalEntersGoalPauseAndResetsBoard() {
+        var state = runningPhaseState()
+        state.puck.position = Vector2(x: 50, y: 199)
+        state.puck.velocity = Vector2(x: 0, y: 100)
+        state.awayPlayer.position = Vector2(x: 90, y: 190)
+        var engine = GameEngine(state: state)
+
+        // The explicit away input parks the CPU striker out of the puck's path.
+        engine.update(
+            deltaTime: 0.05,
+            inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 90, y: 190), timestamp: 1)]
+        )
+
+        #expect(engine.state.score == ScoreState(home: 1, away: 0))
+        #expect(engine.state.phase == .goalPause)
+        #expect(engine.state.phaseRemaining == 1.0)
+        #expect(engine.state.lastScorer == .home)
+        #expect(engine.state.puck.position == phaseConfig.rinkCenter)
+        #expect(engine.state.homePlayer.position == phaseConfig.homeStartPosition)
+        #expect(engine.state.awayPlayer.position == phaseConfig.awayStartPosition)
+    }
+
+    @Test func awayGoalSetsLastScorerAway() {
+        var state = runningPhaseState()
+        state.puck.position = Vector2(x: 50, y: 1)
+        state.puck.velocity = Vector2(x: 0, y: -100)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [])
+
+        #expect(engine.state.score == ScoreState(home: 0, away: 1))
+        #expect(engine.state.phase == .goalPause)
+        #expect(engine.state.lastScorer == .away)
+    }
+
+    @Test func goalPauseFreezesEverythingButItsOwnTimer() {
+        var state = runningPhaseState()
+        state.phase = .goalPause
+        state.phaseRemaining = 1.0
+        state.homeBoost = SkillState(activeRemaining: 1.2, cooldownRemaining: 0)
+        state.awayBlock = SkillState(activeRemaining: 0, cooldownRemaining: 3.0)
+        state.awaySkillDecisionRemaining = 0.05
+        let frozen = state
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.1,
+            inputs: [PlayerInput(playerId: .home, moveVector: Vector2(x: 0, y: 1), activatedSkills: [.block])]
+        )
+
+        let after = engine.state
+        #expect(after.phase == .goalPause)
+        #expect(abs(after.phaseRemaining - 0.9) < 1e-9)
+        #expect(after.remainingTime == frozen.remainingTime)
+        #expect(after.puck == frozen.puck)
+        #expect(after.homePlayer == frozen.homePlayer)
+        #expect(after.awayPlayer == frozen.awayPlayer)
+        #expect(after.homeBoost == frozen.homeBoost)
+        #expect(after.awayBlock == frozen.awayBlock)
+        #expect(after.homeBlock.phase == .ready) // the activation request was ignored
+        #expect(after.awaySkillDecisionRemaining == frozen.awaySkillDecisionRemaining)
+    }
+
+    @Test func goalPauseCannotDoubleScore() {
+        var state = runningPhaseState()
+        state.phase = .goalPause
+        state.phaseRemaining = 1.0
+        state.score = ScoreState(home: 1, away: 0)
+        // Even a puck artificially crossing the goal line must not score while paused.
+        state.puck.position = Vector2(x: 50, y: 199)
+        state.puck.velocity = Vector2(x: 0, y: 400)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.05, inputs: [])
+
+        #expect(engine.state.score == ScoreState(home: 1, away: 0))
+        #expect(engine.state.phase == .goalPause)
+    }
+
+    @Test func goalPauseEndStepDoesNotSimulate() {
+        var state = runningPhaseState()
+        state.phase = .goalPause
+        state.phaseRemaining = 0.1
+        state.puck.velocity = Vector2(x: 0, y: 100)
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+        #expect(engine.state.phase == .running)
+        #expect(engine.state.remainingTime == 10)
+        #expect(engine.state.puck.position == phaseConfig.rinkCenter)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+        #expect(abs(engine.state.remainingTime - 9.9) < 1e-9)
+        #expect(engine.state.puck.position.y > phaseConfig.rinkCenter.y)
+    }
+
+    @Test func zeroGoalPauseConfigKeepsMatchRunning() {
+        var state = GameState.initial(config: config)
+        state.puck.position = Vector2(x: 50, y: 199)
+        state.puck.velocity = Vector2(x: 0, y: 100)
+        state.awayPlayer.position = Vector2(x: 90, y: 190)
+        var engine = GameEngine(state: state)
+
+        engine.update(
+            deltaTime: 0.05,
+            inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 90, y: 190), timestamp: 1)]
+        )
+
+        // Pre-phase behaviour: the goal counts and play continues immediately.
+        #expect(engine.state.score == ScoreState(home: 1, away: 0))
+        #expect(engine.state.phase == .running)
+        #expect(engine.state.lastScorer == .home)
+    }
+
+    @Test func buzzerRemainsStrictWithPhasesEnabled() {
+        var state = runningPhaseState()
+        state.remainingTime = 0.05
+        state.puck.position = Vector2(x: 50, y: 199)
+        state.puck.velocity = Vector2(x: 0, y: 100) // would score without the buzzer
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 0.1, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.score == .zero)
+        #expect(engine.state.phaseRemaining == 0)
+    }
+
+    @Test func finishedStateFreezesPhaseTimer() {
+        var state = runningPhaseState()
+        state.phase = .finished
+        state.phaseRemaining = 0.5 // artificial: must stay untouched after finish
+        var engine = GameEngine(state: state)
+
+        engine.update(deltaTime: 1.0, inputs: [])
+
+        #expect(engine.state.phase == .finished)
+        #expect(engine.state.phaseRemaining == 0.5)
+    }
+
+    @Test func matchPhaseFlowIsDeterministic() {
+        // Countdown -> running -> home goal -> goal pause -> running, all in one
+        // delta sequence. The explicit away input parks the CPU out of the puck's
+        // path so the goal is part of the scripted flow.
+        var initial = GameState.initial(config: phaseConfig)
+        initial.puck.velocity = Vector2(x: 0, y: 300) // frozen until the countdown ends
+        let deltas = [Double](repeating: 0.5, count: 6) + [Double](repeating: 0.05, count: 30)
+
+        func run() -> [GameState] {
+            var engine = GameEngine(state: initial)
+            var states: [GameState] = []
+            for dt in deltas {
+                engine.update(
+                    deltaTime: dt,
+                    inputs: [PlayerInput(playerId: .away, targetPosition: Vector2(x: 90, y: 190), timestamp: 1)]
+                )
+                states.append(engine.state)
+            }
+            return states
+        }
+
+        let first = run()
+        let second = run()
+        #expect(first == second)
+        // Non-vacuous: the run actually passed through a goal pause and scored.
+        #expect(first.contains { $0.phase == .goalPause })
+        #expect(first.last?.score.home == 1)
+    }
+
+    @Test func localSessionRunsOpeningCountdown() {
+        let session = LocalMatchSession(config: phaseConfig)
+        let fixedDelta = 1.0 / phaseConfig.tickRate
+
+        // ~1.5s of fixed steps: still counting down, match clock untouched.
+        for _ in 0..<90 {
+            session.advance(deltaTime: fixedDelta)
+        }
+        #expect(session.state.phase == .countdown)
+        #expect(session.state.remainingTime == 10)
+
+        // Past 3s of fixed steps: the match is running.
+        for _ in 0..<100 {
+            session.advance(deltaTime: fixedDelta)
+        }
+        #expect(session.state.phase == .running)
     }
 }

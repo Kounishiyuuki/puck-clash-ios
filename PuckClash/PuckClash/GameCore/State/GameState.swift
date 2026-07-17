@@ -41,9 +41,14 @@ struct ScoreState: Equatable {
     }
 }
 
+// Deterministic match flow: an opening countdown, normal play, a short pause after
+// each goal, and the final buzzer. During countdown / goalPause only
+// GameState.phaseRemaining advances (by the fixed step) — the match clock, players,
+// puck, skills and the CPU decision timer are all frozen.
 enum MatchPhase: Equatable {
-    case ready
+    case countdown
     case running
+    case goalPause
     case finished
 }
 
@@ -199,6 +204,12 @@ struct MatchConfig: Equatable {
     // Away-CPU skill-decision tuning; Normal by default so existing configs keep
     // the original CPU behaviour.
     let cpuBehavior: CPUBehaviorConfig
+    // Opening countdown before play starts. 0 disables it (the match starts running
+    // immediately), which is what most engine tests use.
+    let openingCountdownDuration: TimeInterval
+    // Freeze after each goal before play resumes. 0 disables it (scoring keeps the
+    // match running, the pre-phase behaviour).
+    let goalPauseDuration: TimeInterval
 
     init(
         rinkSize: Vector2,
@@ -215,7 +226,9 @@ struct MatchConfig: Equatable {
         boost: BoostConfig = BoostConfig(),
         shot: ShotConfig = ShotConfig(),
         block: BlockConfig = BlockConfig(),
-        cpuBehavior: CPUBehaviorConfig = .normal
+        cpuBehavior: CPUBehaviorConfig = .normal,
+        openingCountdownDuration: TimeInterval = 3.0,
+        goalPauseDuration: TimeInterval = 1.0
     ) {
         self.rinkSize = rinkSize
         self.matchDuration = matchDuration
@@ -232,6 +245,8 @@ struct MatchConfig: Equatable {
         self.shot = shot
         self.block = block
         self.cpuBehavior = cpuBehavior
+        self.openingCountdownDuration = openingCountdownDuration
+        self.goalPauseDuration = goalPauseDuration
     }
 
     // The same match tuned for a CPU difficulty: geometry, physics and skill values
@@ -252,7 +267,9 @@ struct MatchConfig: Equatable {
             boost: boost,
             shot: shot,
             block: block,
-            cpuBehavior: cpuBehavior
+            cpuBehavior: cpuBehavior,
+            openingCountdownDuration: openingCountdownDuration,
+            goalPauseDuration: goalPauseDuration
         )
     }
 
@@ -376,11 +393,17 @@ struct GameState: Equatable {
     // (not the engine) so the CPU decision cadence is reproducible from a snapshot and stays
     // deterministic; advanced by GameEngine each fixed step. Not a wall-clock time.
     var awaySkillDecisionRemaining: TimeInterval
+    // Time left in the current countdown / goalPause phase; 0 while running or finished.
+    // The only value the engine advances during those freeze phases.
+    var phaseRemaining: TimeInterval
+    // Which side scored most recently; nil until the first goal. Lets the presentation
+    // layer attribute a goal pause without diffing scores.
+    var lastScorer: PlayerSide?
 
     static func initial(config: MatchConfig = .standard) -> GameState {
         GameState(
             config: config,
-            phase: .ready,
+            phase: config.openingCountdownDuration > 0 ? .countdown : .running,
             score: .zero,
             remainingTime: config.matchDuration,
             homePlayer: PlayerState(
@@ -405,7 +428,9 @@ struct GameState: Equatable {
             awayShot: .ready,
             homeBlock: .ready,
             awayBlock: .ready,
-            awaySkillDecisionRemaining: 0
+            awaySkillDecisionRemaining: 0,
+            phaseRemaining: config.openingCountdownDuration,
+            lastScorer: nil
         )
     }
 }

@@ -12,8 +12,16 @@ struct GameEngine {
             return
         }
 
-        if state.phase == .ready {
-            state.phase = .running
+        // Countdown / goal pause: the whole match is frozen — no clock, movement,
+        // skills, CPU decisions, collisions or scoring. Only the phase timer runs,
+        // and the step that ends the phase does nothing else, so play resumes on the
+        // next fixed step (never mid-step).
+        if state.phase == .countdown || state.phase == .goalPause {
+            state.phaseRemaining = max(0, state.phaseRemaining - deltaTime)
+            if state.phaseRemaining == 0 {
+                state.phase = .running
+            }
+            return
         }
 
         state.remainingTime = max(0, state.remainingTime - deltaTime)
@@ -463,6 +471,15 @@ struct GameEngine {
         state.homePlayer.velocity = .zero
         state.awayPlayer.position = state.config.awayStartPosition
         state.awayPlayer.velocity = .zero
+
+        // Freeze play briefly after the goal (see MatchPhase). The early return in
+        // update() makes a double score during the pause impossible. A zero duration
+        // keeps the pre-phase behaviour: the match just keeps running.
+        state.lastScorer = side
+        if state.config.goalPauseDuration > 0 {
+            state.phase = .goalPause
+            state.phaseRemaining = state.config.goalPauseDuration
+        }
     }
 
     // Home is confined to the bottom half (y in [0, center]); away to the top half.
