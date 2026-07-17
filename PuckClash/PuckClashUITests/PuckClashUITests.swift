@@ -153,6 +153,11 @@ final class PuckClashUITests: XCTestCase {
         XCTAssertTrue(classicMap.waitForExistence(timeout: 5))
         classicMap.tap()
 
+        // The opening countdown runs first; skills unlock once it ends.
+        let countdown = app.staticTexts["match-countdown-overlay"]
+        XCTAssertTrue(countdown.waitForExistence(timeout: 5))
+        XCTAssertTrue(countdown.waitForNonExistence(timeout: 8))
+
         // Boost, Shot and Block are all now enabled and tappable.
         let boost = app.buttons["skill-boost-button"]
         XCTAssertTrue(boost.waitForExistence(timeout: 5))
@@ -209,6 +214,94 @@ final class PuckClashUITests: XCTestCase {
         app.buttons["map-classic"].tap()
 
         XCTAssertTrue(app.otherElements["joystick-control"].waitForExistence(timeout: 5))
+    }
+
+    // Shared navigation: Start -> CPU Practice -> Normal -> Classic -> Match.
+    @MainActor
+    private func enterMatch(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        app.buttons["start-match-button"].tap()
+        XCTAssertTrue(app.buttons["mode-cpu-practice"].waitForExistence(timeout: 5))
+        app.buttons["mode-cpu-practice"].tap()
+        XCTAssertTrue(app.buttons["cpu-difficulty-normal"].waitForExistence(timeout: 5))
+        app.buttons["cpu-difficulty-normal"].tap()
+        XCTAssertTrue(app.buttons["map-classic"].waitForExistence(timeout: 5))
+        app.buttons["map-classic"].tap()
+        XCTAssertTrue(app.otherElements["joystick-control"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testMatchOpensWithCountdownThenUnlocksControls() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterMatch(app)
+
+        // Sampled immediately after the match screen appears (the joystick and the
+        // countdown render together), so this lands inside the 3s countdown: skills
+        // are locked and the overlay is up.
+        let boost = app.buttons["skill-boost-button"]
+        XCTAssertTrue(boost.waitForExistence(timeout: 5))
+        XCTAssertFalse(boost.isEnabled)
+        let countdown = app.staticTexts["match-countdown-overlay"]
+        XCTAssertTrue(countdown.exists)
+
+        // Countdown ends on its own; the match unlocks.
+        XCTAssertTrue(countdown.waitForNonExistence(timeout: 8))
+        XCTAssertTrue(boost.isEnabled)
+        XCTAssertTrue(app.otherElements["joystick-control"].exists)
+    }
+
+    @MainActor
+    func testPauseAndResumeKeepsMatch() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterMatch(app)
+        XCTAssertTrue(app.staticTexts["match-countdown-overlay"].waitForNonExistence(timeout: 8))
+
+        let pauseButton = app.buttons["pause-match-button"]
+        XCTAssertTrue(pauseButton.waitForExistence(timeout: 5))
+        pauseButton.tap()
+
+        // Paused: overlay up, skills locked, board still visible.
+        XCTAssertTrue(app.staticTexts["pause-overlay"].waitForExistence(timeout: 5))
+        let boost = app.buttons["skill-boost-button"]
+        XCTAssertTrue(boost.exists)
+        XCTAssertFalse(boost.isEnabled)
+
+        // Resume returns to the same match with controls unlocked.
+        let resumeButton = app.buttons["resume-match-button"]
+        XCTAssertTrue(resumeButton.waitForExistence(timeout: 5))
+        resumeButton.tap()
+        XCTAssertTrue(app.staticTexts["pause-overlay"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(boost.isEnabled)
+        XCTAssertTrue(app.otherElements["joystick-control"].exists)
+    }
+
+    @MainActor
+    func testQuitFromPauseReturnsToTitleAfterConfirmation() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterMatch(app)
+
+        let pauseButton = app.buttons["pause-match-button"]
+        XCTAssertTrue(pauseButton.waitForExistence(timeout: 5))
+        pauseButton.tap()
+
+        let quitButton = app.buttons["quit-match-button"]
+        XCTAssertTrue(quitButton.waitForExistence(timeout: 5))
+        quitButton.tap()
+
+        // A confirmation step guards the quit; cancel first, then really quit.
+        let confirmButton = app.buttons["quit-confirm-button"]
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        app.buttons["quit-cancel-button"].tap()
+        XCTAssertTrue(app.buttons["quit-match-button"].waitForExistence(timeout: 5))
+        app.buttons["quit-match-button"].tap()
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["joystick-control"].exists)
     }
 
     @MainActor

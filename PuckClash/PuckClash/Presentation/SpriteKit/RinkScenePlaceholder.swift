@@ -8,6 +8,10 @@ final class RinkScene: SKScene {
     // SwiftUI and holds no game rules.
     var onFinished: ((ScoreState) -> Void)?
     var onHUDChange: ((MatchHUD) -> Void)?
+    // App-level pause, set by the match controller. While true the scene keeps
+    // rendering the current state but never advances the session; pausing is a
+    // presentation/session concern, so no paused flag exists in GameCore.
+    var isMatchPaused = false
     private var hasNotifiedFinish = false
     private var lastHUD: MatchHUD?
     private var lastScore: ScoreState?
@@ -75,6 +79,14 @@ final class RinkScene: SKScene {
         let deltaTime = lastUpdateTime.map { currentTime - $0 } ?? 0
         lastUpdateTime = currentTime
 
+        // Paused: keep drawing the current state without advancing the simulation.
+        // lastUpdateTime still updates every frame above, so resuming produces a
+        // normal one-frame delta instead of the whole paused span as catch-up.
+        if isMatchPaused {
+            render(session.state)
+            return
+        }
+
         // Pass the raw frame delta: the session owns time management now, running the
         // simulation in fixed steps and capping catch-up so a hitch cannot tunnel the
         // puck or trigger a runaway burst of steps. Only the snapshot's state is
@@ -141,6 +153,9 @@ final class RinkScene: SKScene {
             homeScore: state.score.home,
             awayScore: state.score.away,
             remainingSeconds: Int(state.remainingTime.rounded(.up)),
+            matchPhase: state.phase,
+            phaseRemainingSeconds: Int(state.phaseRemaining.rounded(.up)),
+            lastScorer: state.lastScorer,
             boostPhase: boost.phase,
             boostRemainingSeconds: boostRemainingSeconds,
             shotPhase: shot.phase,
