@@ -2129,6 +2129,197 @@ struct PuckClashTests {
         }
     }
 
+    // MARK: - Local versus dual input
+
+    // An externally driven session always feeds an explicit away input (even a
+    // neutral one), so the engine's away CPU must never run.
+
+    @Test func externallyDrivenAwayDisablesCPU() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+
+        for _ in 0..<30 {
+            session.advance(deltaTime: 1.0 / 60)
+        }
+
+        // The CPU decision timer never ticks or resets, no away skill fires, and the
+        // away striker holds its start position with no movement input.
+        #expect(session.state.awaySkillDecisionRemaining == 0)
+        #expect(session.state.awayPlayer.position == config.awayStartPosition)
+        #expect(session.state.awayBoost.phase == .ready)
+        #expect(session.state.awayShot.phase == .ready)
+        #expect(session.state.awayBlock.phase == .ready)
+    }
+
+    @Test func cpuStillRunsWithoutExternalDrive() {
+        let session = LocalMatchSession(config: config)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        // The CPU decision ran on the first step and reset its timer to the interval.
+        #expect(session.state.awaySkillDecisionRemaining == 0.18)
+    }
+
+    @Test func awayMovementMovesAwayStriker() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.setMovement(Vector2(x: 0, y: -1), for: .away)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        #expect(session.state.awayPlayer.position.y < config.awayStartPosition.y)
+        #expect(session.state.homePlayer.position == config.homeStartPosition)
+    }
+
+    @Test func dualMovementIsIndependent() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.setMovement(Vector2(x: 1, y: 0), for: .home)
+        session.setMovement(Vector2(x: -1, y: 0), for: .away)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        // Neither side's vector clobbered the other's.
+        #expect(session.state.homePlayer.position.x > config.homeStartPosition.x)
+        #expect(session.state.awayPlayer.position.x < config.awayStartPosition.x)
+    }
+
+    @Test func dualBoostActivatesBothSides() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.queueSkill(.boost, for: .home)
+        session.queueSkill(.boost, for: .away)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        #expect(session.state.homeBoost.phase == .active)
+        #expect(session.state.awayBoost.phase == .active)
+    }
+
+    @Test func awayShotAndBlockActivate() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.queueSkill(.shot, for: .away)
+        session.advance(deltaTime: 1.0 / 60)
+        #expect(session.state.awayShot.phase == .active)
+
+        session.queueSkill(.block, for: .away)
+        session.advance(deltaTime: 1.0 / 60)
+        #expect(session.state.awayBlock.phase == .active)
+    }
+
+    @Test func skillQueuesAreIndependent() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.queueSkill(.boost, for: .away)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        #expect(session.state.homeBoost.phase == .ready)
+        #expect(session.state.awayBoost.phase == .active)
+    }
+
+    @Test func awaySkillFiresOnceAcrossCatchUp() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        let fixedDelta = 1.0 / config.tickRate
+        session.queueSkill(.boost, for: .away)
+
+        // One advance spanning the 5-step catch-up cap: the boost fires on the first
+        // step only, then just counts down — never re-fires on later steps.
+        session.advance(deltaTime: fixedDelta * 6)
+
+        #expect(session.state.awayBoost.phase == .active)
+        #expect(abs(session.state.awayBoost.activeRemaining - (config.boost.duration - 5 * fixedDelta)) < 1e-9)
+    }
+
+    @Test func countdownDropsHeldAndQueuedDualInput() {
+        let session = LocalMatchSession(config: phaseConfig, awayExternallyDriven: true)
+        session.setMovement(Vector2(x: 1, y: 0), for: .home)
+        session.setMovement(Vector2(x: 1, y: 0), for: .away)
+        session.queueSkill(.boost, for: .home)
+        session.queueSkill(.shot, for: .away)
+
+        // Through the whole 3s countdown and into play.
+        for _ in 0..<200 {
+            session.advance(deltaTime: 1.0 / 60)
+        }
+
+        // Nothing tapped or held during the countdown leaks into the match.
+        #expect(session.state.phase == .running)
+        #expect(session.state.homeBoost.phase == .ready)
+        #expect(session.state.awayShot.phase == .ready)
+        #expect(session.state.homePlayer.position == phaseConfig.homeStartPosition)
+        #expect(session.state.awayPlayer.position == phaseConfig.awayStartPosition)
+    }
+
+    @Test func clearAllInputsDropsEverything() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        session.setMovement(Vector2(x: 1, y: 0), for: .home)
+        session.setMovement(Vector2(x: -1, y: 0), for: .away)
+        session.queueSkill(.boost, for: .home)
+        session.queueSkill(.block, for: .away)
+
+        session.clearAllInputs()
+        session.advance(deltaTime: 1.0 / 60)
+
+        #expect(session.state.homePlayer.position == config.homeStartPosition)
+        #expect(session.state.awayPlayer.position == config.awayStartPosition)
+        #expect(session.state.homeBoost.phase == .ready)
+        #expect(session.state.awayBlock.phase == .ready)
+    }
+
+    @Test func finishedMatchIgnoresDualInput() {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+        for _ in 0..<610 { // matchDuration 10s at 60Hz -> the buzzer has fired
+            session.advance(deltaTime: 1.0 / 60)
+        }
+        #expect(session.state.phase == .finished)
+        let finished = session.state
+
+        session.setMovement(Vector2(x: 1, y: 0), for: .home)
+        session.setMovement(Vector2(x: -1, y: 0), for: .away)
+        session.queueSkill(.boost, for: .home)
+        session.queueSkill(.shot, for: .away)
+        for _ in 0..<10 {
+            session.advance(deltaTime: 1.0 / 60)
+        }
+
+        #expect(session.state == finished)
+    }
+
+    @Test func dualInputSimulationIsDeterministic() {
+        func run() -> [GameState] {
+            let session = LocalMatchSession(config: config, awayExternallyDriven: true)
+            var states: [GameState] = []
+            for i in 0..<60 {
+                if i == 5 {
+                    session.queueSkill(.boost, for: .home)
+                }
+                if i == 10 {
+                    session.queueSkill(.shot, for: .away)
+                }
+                session.setMovement(Vector2(x: i % 2 == 0 ? 0.5 : -0.5, y: 0.2), for: .home)
+                session.setMovement(Vector2(x: 0.3, y: i % 3 == 0 ? -0.6 : 0.1), for: .away)
+                session.advance(deltaTime: 1.0 / 60)
+                states.append(session.state)
+            }
+            return states
+        }
+
+        let first = run()
+        let second = run()
+        #expect(first == second)
+        #expect(first.contains { $0.homeBoost.phase == .active && $0.awayShot.phase == .active })
+    }
+
+    @Test func symmetricSpeedScalesApplyToDualInput() {
+        let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.12)
+        let session = LocalMatchSession(config: scaled, awayExternallyDriven: true)
+        session.setMovement(Vector2(x: 1, y: 0), for: .home)
+        session.setMovement(Vector2(x: 1, y: 0), for: .away)
+
+        session.advance(deltaTime: 1.0 / 60)
+
+        let homeDX = session.state.homePlayer.position.x - scaled.homeStartPosition.x
+        let awayDX = session.state.awayPlayer.position.x - scaled.awayStartPosition.x
+        #expect(abs(homeDX - awayDX) < 1e-9)
+        #expect(abs(homeDX - 1000 * 1.12 / 60) < 1e-9)
+    }
+
     @Test func scaledSimulationIsDeterministic() {
         let scaled = config.withStrikerSpeedScales(home: 1.12, away: 1.0)
         var initial = GameState.initial(config: scaled)

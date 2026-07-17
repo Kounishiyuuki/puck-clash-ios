@@ -523,8 +523,9 @@ extension MatchSession {
     func activateHomeSkill(_ skill: SkillID) {}
 }
 
-// Runs the match entirely on-device by owning a GameEngine. Home input arrives as
-// a joystick move vector; the away CPU stays inside GameEngine.update. All rules,
+// Runs the match entirely on-device by owning a GameEngine. Input arrives through
+// a side-neutral API (movement vectors and queued skills per PlayerID); the away
+// side is either the engine's CPU (default) or externally driven. All rules,
 // physics, scoring and timing remain in GameEngine — this class only wires input
 // into it and advances the clock, so a future session implementation can replace it.
 final class LocalMatchSession: MatchSession {
@@ -534,19 +535,29 @@ final class LocalMatchSession: MatchSession {
     private static let maxCatchUpSteps = 5
 
     let config: MatchConfig
+    // When true the session supplies an explicit away input on every step — even a
+    // neutral one — so the engine's away CPU never runs. The away side is then fed
+    // through the side-neutral input API: a second local player today, and a remote
+    // player can be piped into the same away-side API later.
+    private let awayExternallyDriven: Bool
     private var engine: GameEngine
-    // Latest joystick vector; nil (or zero, normalized to nil) means no home input.
+    // Latest continuous movement per side; nil (or zero, normalized to nil) means
+    // no movement input for that side.
     private var homeMoveVector: Vector2?
+    private var awayMoveVector: Vector2?
     // Real time received but not yet simulated, drained in whole fixedDelta steps.
     private var accumulatedTime: TimeInterval = 0
     // Fixed-step counter: +1 for each engine.update(fixedDelta). Reported in snapshots.
     private var tick = 0
-    // Skill activations requested since the last consumed step; applied to exactly one
-    // fixed step (edge-triggered) so holding the button or a catch-up burst fires once.
-    private var pendingSkillActivations: Set<SkillID> = []
+    // Per-side skill activations queued since the last consumed step; each set is
+    // applied to exactly one fixed step (edge-triggered) so holding a button or a
+    // catch-up burst fires once.
+    private var homePendingSkills: Set<SkillID> = []
+    private var awayPendingSkills: Set<SkillID> = []
 
-    init(config: MatchConfig) {
+    init(config: MatchConfig, awayExternallyDriven: Bool = false) {
         self.config = config
+        self.awayExternallyDriven = awayExternallyDriven
         self.engine = GameEngine(state: .initial(config: config))
     }
 
@@ -554,26 +565,53 @@ final class LocalMatchSession: MatchSession {
         engine.state
     }
 
+    // MARK: Side-neutral input API
+
     // A zero vector is treated as "no input" so a released joystick does not force
     // the striker through the half clamp every frame (matches the previous scene).
-    func setHomeInput(moveVector: Vector2?) {
-        if let moveVector, moveVector != .zero {
-            homeMoveVector = moveVector
-        } else {
-            homeMoveVector = nil
+    func setMovement(_ moveVector: Vector2?, for side: PlayerID) {
+        let normalized: Vector2? = (moveVector == .zero) ? nil : moveVector
+        switch side {
+        case .home:
+            homeMoveVector = normalized
+        case .away:
+            awayMoveVector = normalized
         }
     }
 
-    // Queue a skill for the local (home) player; consumed by the next fixed step.
+    // Queue a skill for one side; consumed by the next fixed step.
+    func queueSkill(_ skill: SkillID, for side: PlayerID) {
+        switch side {
+        case .home:
+            homePendingSkills.insert(skill)
+        case .away:
+            awayPendingSkills.insert(skill)
+        }
+    }
+
+    // Drop all held movement and queued skills on both sides.
+    func clearAllInputs() {
+        homeMoveVector = nil
+        awayMoveVector = nil
+        homePendingSkills.removeAll()
+        awayPendingSkills.removeAll()
+    }
+
+    // MARK: MatchSession (home-centric entry points, kept for existing callers)
+
+    func setHomeInput(moveVector: Vector2?) {
+        setMovement(moveVector, for: .home)
+    }
+
     func activateHomeSkill(_ skill: SkillID) {
-        pendingSkillActivations.insert(skill)
+        queueSkill(skill, for: .home)
     }
 
     // Accumulate the real frame delta and drain it in fixed 1/tickRate steps, so the
-    // simulation advances at a frame-rate-independent rate. The move vector is applied
-    // to every step; a pending skill activation is applied to only the first step and
-    // then cleared, so it fires once even across a catch-up burst. If no step runs
-    // (delta shorter than one step), the pending activation carries over to next time.
+    // simulation advances at a frame-rate-independent rate. Move vectors are applied
+    // to every step; pending skill activations are applied to only the first step and
+    // then cleared, so each fires once even across a catch-up burst. If no step runs
+    // (delta shorter than one step), pending activations carry over to next time.
     @discardableResult
     func advance(deltaTime: TimeInterval) -> MatchSnapshot {
         let fixedDelta = 1.0 / config.tickRate
@@ -581,10 +619,12 @@ final class LocalMatchSession: MatchSession {
 
         var steps = 0
         while accumulatedTime >= fixedDelta, steps < Self.maxCatchUpSteps {
-            let activations = steps == 0 ? pendingSkillActivations : []
-            engine.update(deltaTime: fixedDelta, inputs: homeInputs(activatedSkills: activations))
+            let homeSkills = steps == 0 ? homePendingSkills : []
+            let awaySkills = steps == 0 ? awayPendingSkills : []
+            engine.update(deltaTime: fixedDelta, inputs: inputs(homeSkills: homeSkills, awaySkills: awaySkills))
             if steps == 0 {
-                pendingSkillActivations.removeAll()
+                homePendingSkills.removeAll()
+                awayPendingSkills.removeAll()
             }
             accumulatedTime -= fixedDelta
             tick += 1
@@ -596,15 +636,26 @@ final class LocalMatchSession: MatchSession {
             accumulatedTime = 0
         }
 
+        // Freeze phases (countdown / goal pause / buzzer): drop everything held or
+        // queued, so no input from before or during a freeze leaks into play later.
+        if steps > 0, engine.state.phase != .running {
+            clearAllInputs()
+        }
+
         return MatchSnapshot(tick: tick, state: engine.state, isAuthoritative: true)
     }
 
-    // Build the home input for one fixed step. Returns no input only when there is
-    // neither movement nor a skill activation to apply.
-    private func homeInputs(activatedSkills: Set<SkillID>) -> [PlayerInput] {
-        guard homeMoveVector != nil || !activatedSkills.isEmpty else {
-            return []
+    // Build the inputs for one fixed step. Home input is omitted when idle (like
+    // before); the away input is always emitted when externally driven, because an
+    // explicit away input — even a neutral one — is what keeps the CPU switched off.
+    private func inputs(homeSkills: Set<SkillID>, awaySkills: Set<SkillID>) -> [PlayerInput] {
+        var result: [PlayerInput] = []
+        if homeMoveVector != nil || !homeSkills.isEmpty {
+            result.append(PlayerInput(playerId: .home, moveVector: homeMoveVector, activatedSkills: homeSkills))
         }
-        return [PlayerInput(playerId: .home, moveVector: homeMoveVector, activatedSkills: activatedSkills)]
+        if awayExternallyDriven {
+            result.append(PlayerInput(playerId: .away, moveVector: awayMoveVector ?? .zero, activatedSkills: awaySkills))
+        }
+        return result
     }
 }

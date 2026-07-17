@@ -8,13 +8,20 @@
 import Combine
 import SwiftUI
 
+// How a match is driven, decided in the UI flow. Presentation-only: GameCore never
+// sees this type — it only receives the per-side config values derived from it.
+enum MatchMode: Equatable {
+    case cpuPractice(CPUDifficulty)
+    case localVersus
+}
+
 enum MatchFlow {
     case start
     case modeSelect
     case difficultySelect
-    case mapSelect(CPUDifficulty)
-    case match(MapDefinition, CPUDifficulty)
-    case result(ScoreState, MapDefinition, CPUDifficulty)
+    case mapSelect(MatchMode)
+    case match(MapDefinition, MatchMode)
+    case result(ScoreState, MapDefinition, MatchMode)
 }
 
 // UI-facing difficulty text. GameCore stays free of presentation strings, so the
@@ -74,8 +81,8 @@ final class MatchController: ObservableObject {
     // every simulation timer freezes together and resume continues exactly in place.
     @Published private(set) var isPaused = false
 
-    init(config: MatchConfig, onFinished: @escaping (ScoreState) -> Void) {
-        let session = LocalMatchSession(config: config)
+    init(config: MatchConfig, awayExternallyDriven: Bool = false, onFinished: @escaping (ScoreState) -> Void) {
+        let session = LocalMatchSession(config: config, awayExternallyDriven: awayExternallyDriven)
         self.session = session
         let scene = RinkScene(session: session)
         self.scene = scene
@@ -85,25 +92,18 @@ final class MatchController: ObservableObject {
         }
     }
 
-    // Fire the local player's Boost skill; the session edge-triggers it onto one step.
-    func activateBoost() {
-        session.activateHomeSkill(.boost)
-    }
-
-    // Fire the local player's Shot skill; edge-triggered onto one fixed step like Boost.
-    func activateShot() {
-        session.activateHomeSkill(.shot)
-    }
-
-    // Fire the local player's Block skill; edge-triggered onto one fixed step like Boost.
-    func activateBlock() {
-        session.activateHomeSkill(.block)
-    }
-
-    // Joystick vector goes straight to the session (not through @Published) so dragging
+    // Side-neutral input entry points, mirroring the session API: the home side is
+    // the bottom player, the away side is the top player (or, later, a remote
+    // player fed into the same away-side calls).
+    // Movement goes straight to the session (not through @Published) so dragging
     // does not re-render SwiftUI every frame. The session treats zero as no input.
-    func setMoveVector(_ vector: Vector2) {
-        session.setHomeInput(moveVector: vector)
+    func setMovement(_ vector: Vector2, for side: PlayerID) {
+        session.setMovement(vector, for: side)
+    }
+
+    // Fire a skill for one side; the session edge-triggers it onto one fixed step.
+    func activateSkill(_ skill: SkillID, for side: PlayerID) {
+        session.queueSkill(skill, for: side)
     }
 
     func pause() {
@@ -112,8 +112,9 @@ final class MatchController: ObservableObject {
         }
         isPaused = true
         scene.isMatchPaused = true
-        // Drop any held joystick input so resuming never replays a stale vector.
-        session.setHomeInput(moveVector: nil)
+        // Drop all held movement and queued skills (both sides) so resuming never
+        // replays anything from before the pause.
+        session.clearAllInputs()
     }
 
     func resume() {
@@ -169,40 +170,50 @@ struct ContentView: View {
         case .modeSelect:
             ModeSelectView(
                 onSelectCPU: { flow = .difficultySelect },
+                onSelectLocal: { flow = .mapSelect(.localVersus) },
                 onBack: { flow = .start }
             )
         case .difficultySelect:
             DifficultySelectView(
-                onSelectDifficulty: { difficulty in flow = .mapSelect(difficulty) },
+                onSelectDifficulty: { difficulty in flow = .mapSelect(.cpuPractice(difficulty)) },
                 onBack: { flow = .modeSelect }
             )
-        case .mapSelect(let difficulty):
+        case .mapSelect(let mode):
             MapSelectView(
-                onSelectMap: { map in startMatch(map, difficulty: difficulty) },
-                onBack: { flow = .difficultySelect }
+                onSelectMap: { map in startMatch(map, mode: mode) },
+                onBack: {
+                    // Local versus skips the difficulty screen, so back leads there
+                    // only for CPU practice.
+                    switch mode {
+                    case .cpuPractice:
+                        flow = .difficultySelect
+                    case .localVersus:
+                        flow = .modeSelect
+                    }
+                }
             )
-        case .match(let map, let difficulty):
+        case .match(let map, let mode):
             MatchView(
                 map: map,
-                difficulty: difficulty,
-                onFinished: { score in flow = .result(score, map, difficulty) },
+                mode: mode,
+                onFinished: { score in flow = .result(score, map, mode) },
                 onQuit: { flow = .start }
             )
             .id(matchID)
-        case .result(let score, let map, let difficulty):
+        case .result(let score, let map, let mode):
             ResultView(
                 score: score,
-                difficulty: difficulty,
-                onRetry: { startMatch(map, difficulty: difficulty) },
+                mode: mode,
+                onRetry: { startMatch(map, mode: mode) },
                 onBackToTitle: { flow = .start }
             )
         }
     }
 
     // A new match identity rebuilds the controller (and its scene/engine).
-    private func startMatch(_ map: MapDefinition, difficulty: CPUDifficulty) {
+    private func startMatch(_ map: MapDefinition, mode: MatchMode) {
         matchID = UUID()
-        flow = .match(map, difficulty)
+        flow = .match(map, mode)
     }
 }
 
@@ -219,6 +230,7 @@ private struct ArenaBackground: View {
 
 private struct ModeSelectView: View {
     let onSelectCPU: () -> Void
+    let onSelectLocal: () -> Void
     let onBack: () -> Void
     @State private var showComingSoon = false
 
@@ -240,6 +252,15 @@ private struct ModeSelectView: View {
                     action: onSelectCPU
                 )
                 .accessibilityIdentifier("mode-cpu-practice")
+
+                SelectionCard(
+                    title: "ローカル対戦",
+                    subtitle: "1台で2人対戦",
+                    accent: Palette.accent,
+                    dimmed: false,
+                    action: onSelectLocal
+                )
+                .accessibilityIdentifier("local-versus-mode-button")
 
                 SelectionCard(
                     title: "オンライン対戦",
@@ -400,23 +421,40 @@ struct MatchView: View {
     @StateObject private var controller: MatchController
     @Environment(\.scenePhase) private var scenePhase
     @State private var confirmingQuit = false
+    private let mode: MatchMode
     private let onQuit: () -> Void
 
     init(
         map: MapDefinition,
-        difficulty: CPUDifficulty,
+        mode: MatchMode,
         onFinished: @escaping (ScoreState) -> Void,
         onQuit: @escaping () -> Void
     ) {
         _controller = StateObject(
             wrappedValue: MatchController(
-                config: map.config
-                    .withCPUBehavior(difficulty.behavior)
-                    .withStrikerSpeedScales(home: humanControlSpeedScale, away: 1.0),
+                config: Self.matchConfig(map: map, mode: mode),
+                awayExternallyDriven: mode == .localVersus,
                 onFinished: onFinished
             )
         )
+        self.mode = mode
         self.onQuit = onQuit
+    }
+
+    // The GameCore config for a mode: CPU practice speeds up only the human home
+    // side and applies the chosen CPU difficulty; local versus gives both human
+    // sides the same speed edge (the CPU never runs — the session always feeds an
+    // explicit away input).
+    private static func matchConfig(map: MapDefinition, mode: MatchMode) -> MatchConfig {
+        switch mode {
+        case .cpuPractice(let difficulty):
+            return map.config
+                .withCPUBehavior(difficulty.behavior)
+                .withStrikerSpeedScales(home: humanControlSpeedScale, away: 1.0)
+        case .localVersus:
+            return map.config
+                .withStrikerSpeedScales(home: humanControlSpeedScale, away: humanControlSpeedScale)
+        }
     }
 
     // Player input is only meaningful while the match is actually playing: the
@@ -471,24 +509,25 @@ struct MatchView: View {
         }
         .safeAreaInset(edge: .bottom) {
             BottomControls(
-                onMove: { controller.setMoveVector($0) },
+                onMove: { controller.setMovement($0, for: .home) },
                 boostPhase: controller.hud.boostPhase,
                 boostRemainingSeconds: controller.hud.boostRemainingSeconds,
-                onBoost: { controller.activateBoost() },
+                onBoost: { controller.activateSkill(.boost, for: .home) },
                 shotPhase: controller.hud.shotPhase,
                 shotRemainingSeconds: controller.hud.shotRemainingSeconds,
-                onShot: { controller.activateShot() },
+                onShot: { controller.activateSkill(.shot, for: .home) },
                 blockPhase: controller.hud.blockPhase,
                 blockRemainingSeconds: controller.hud.blockRemainingSeconds,
-                onBlock: { controller.activateBlock() }
+                onBlock: { controller.activateSkill(.block, for: .home) }
             )
             .disabled(!controlsEnabled)
             .opacity(controlsEnabled ? 1 : 0.45)
         }
         .onChange(of: controlsEnabled) { _, enabled in
-            // Gating can flip mid-drag; make sure no stale joystick vector survives.
+            // Gating can flip mid-drag; make sure no stale movement survives.
             if !enabled {
-                controller.setMoveVector(.zero)
+                controller.setMovement(.zero, for: .home)
+                controller.setMovement(.zero, for: .away)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -1023,16 +1062,20 @@ private struct RinkEmblem: View {
 
 struct ResultView: View {
     let score: ScoreState
-    let difficulty: CPUDifficulty
+    let mode: MatchMode
     let onRetry: () -> Void
     let onBackToTitle: () -> Void
+
+    private var isLocalVersus: Bool {
+        mode == .localVersus
+    }
 
     private var outcomeText: String {
         switch score.winner {
         case .home:
-            return "あなたの勝ち"
+            return isLocalVersus ? "PLAYER 1の勝ち" : "あなたの勝ち"
         case .away:
-            return "CPUの勝ち"
+            return isLocalVersus ? "PLAYER 2の勝ち" : "CPUの勝ち"
         case nil:
             return "引き分け"
         }
@@ -1062,20 +1105,21 @@ struct ResultView: View {
                     .font(.system(size: 44, weight: .heavy, design: .rounded))
                     .foregroundStyle(outcomeColor)
 
-                // Which CPU strength this result was played against; retry reuses it.
-                Text("CPU：\(difficulty.displayName)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(.white.opacity(0.08)))
-                    .overlay(Capsule().strokeBorder(Palette.away.opacity(0.5), lineWidth: 1))
-                    .accessibilityIdentifier("result-difficulty-badge")
+                // Which kind of match this result came from; retry reuses it. CPU
+                // practice shows the chosen difficulty, local versus its own badge.
+                switch mode {
+                case .cpuPractice(let difficulty):
+                    badge("CPU：\(difficulty.displayName)")
+                        .accessibilityIdentifier("result-difficulty-badge")
+                case .localVersus:
+                    badge("ローカル対戦")
+                        .accessibilityIdentifier("local-versus-mode-badge")
+                }
 
                 HStack(spacing: 20) {
-                    scoreCard(title: "あなた", value: score.home, color: Palette.home)
+                    scoreCard(title: isLocalVersus ? "PLAYER 1" : "あなた", value: score.home, color: Palette.home)
                     Text("-").font(.system(size: 32, weight: .bold)).foregroundStyle(.white.opacity(0.5))
-                    scoreCard(title: "CPU", value: score.away, color: Palette.away)
+                    scoreCard(title: isLocalVersus ? "PLAYER 2" : "CPU", value: score.away, color: Palette.away)
                 }
                 .padding(.vertical, 8)
 
@@ -1099,6 +1143,16 @@ struct ResultView: View {
             }
             .padding()
         }
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.bold))
+            .foregroundStyle(.white.opacity(0.85))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(.white.opacity(0.08)))
+            .overlay(Capsule().strokeBorder(Palette.away.opacity(0.5), lineWidth: 1))
     }
 
     private func scoreCard(title: String, value: Int, color: Color) -> some View {
