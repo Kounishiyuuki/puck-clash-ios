@@ -68,6 +68,14 @@ struct MatchHUD: Equatable {
     var shotRemainingSeconds = 0
     var blockPhase: SkillPhase = .ready
     var blockRemainingSeconds = 0
+    // Away-side skill states, displayed only when the away side is a local human
+    // (the CPU never needs buttons). Same coarse whole-second derivation.
+    var awayBoostPhase: SkillPhase = .ready
+    var awayBoostRemainingSeconds = 0
+    var awayShotPhase: SkillPhase = .ready
+    var awayShotRemainingSeconds = 0
+    var awayBlockPhase: SkillPhase = .ready
+    var awayBlockRemainingSeconds = 0
 }
 
 // Owns the match: a LocalMatchSession (the simulation) and the RinkScene that renders
@@ -430,13 +438,18 @@ struct MatchView: View {
         onFinished: @escaping (ScoreState) -> Void,
         onQuit: @escaping () -> Void
     ) {
-        _controller = StateObject(
-            wrappedValue: MatchController(
-                config: Self.matchConfig(map: map, mode: mode),
-                awayExternallyDriven: mode == .localVersus,
-                onFinished: onFinished
-            )
+        let controller = MatchController(
+            config: Self.matchConfig(map: map, mode: mode),
+            awayExternallyDriven: mode == .localVersus,
+            onFinished: onFinished
         )
+        if mode == .localVersus {
+            // The dual-cluster layout reserves a P2 control band above the HUD; the
+            // scene fits the board between the enlarged bands.
+            controller.scene.topReservedBand = 270
+            controller.scene.bottomReservedBand = 195
+        }
+        _controller = StateObject(wrappedValue: controller)
         self.mode = mode
         self.onQuit = onQuit
     }
@@ -473,7 +486,7 @@ struct MatchView: View {
                 if controller.hud.matchPhase == .countdown {
                     CountdownOverlay(seconds: controller.hud.phaseRemainingSeconds)
                 } else if controller.hud.matchPhase == .goalPause, let scorer = controller.hud.lastScorer {
-                    GoalOverlay(scorer: scorer)
+                    GoalOverlay(scorer: scorer, isLocalVersus: mode == .localVersus)
                 }
             }
 
@@ -505,7 +518,35 @@ struct MatchView: View {
         .animation(.snappy(duration: 0.2), value: controller.hud.phaseRemainingSeconds)
         .animation(.snappy(duration: 0.2), value: controller.hud.matchPhase)
         .safeAreaInset(edge: .top) {
-            MatchHUDBar(hud: controller.hud)
+            VStack(spacing: 0) {
+                if mode == .localVersus {
+                    // Player 2's cluster sits at the top of the device, rendered
+                    // rotated 180° so its labels read from that side. Gesture
+                    // coordinates rotate with the view; the single world-space flip
+                    // lives in the setMovement wiring below (and only there).
+                    BottomControls(
+                        onMove: { controller.setMovement(Vector2(x: -$0.x, y: -$0.y), for: .away) },
+                        boostPhase: controller.hud.awayBoostPhase,
+                        boostRemainingSeconds: controller.hud.awayBoostRemainingSeconds,
+                        onBoost: { controller.activateSkill(.boost, for: .away) },
+                        shotPhase: controller.hud.awayShotPhase,
+                        shotRemainingSeconds: controller.hud.awayShotRemainingSeconds,
+                        onShot: { controller.activateSkill(.shot, for: .away) },
+                        blockPhase: controller.hud.awayBlockPhase,
+                        blockRemainingSeconds: controller.hud.awayBlockRemainingSeconds,
+                        onBlock: { controller.activateSkill(.block, for: .away) },
+                        identifierPrefix: "away-",
+                        playerLabel: "PLAYER 2",
+                        playerLabelIdentifier: "player-two-label",
+                        compact: true
+                    )
+                    .rotationEffect(.degrees(180))
+                    .disabled(!controlsEnabled)
+                    .opacity(controlsEnabled ? 1 : 0.45)
+                }
+
+                MatchHUDBar(hud: controller.hud, isLocalVersus: mode == .localVersus)
+            }
         }
         .safeAreaInset(edge: .bottom) {
             BottomControls(
@@ -518,7 +559,10 @@ struct MatchView: View {
                 onShot: { controller.activateSkill(.shot, for: .home) },
                 blockPhase: controller.hud.blockPhase,
                 blockRemainingSeconds: controller.hud.blockRemainingSeconds,
-                onBlock: { controller.activateSkill(.block, for: .home) }
+                onBlock: { controller.activateSkill(.block, for: .home) },
+                playerLabel: mode == .localVersus ? "PLAYER 1" : nil,
+                playerLabelIdentifier: "player-one-label",
+                compact: mode == .localVersus
             )
             .disabled(!controlsEnabled)
             .opacity(controlsEnabled ? 1 : 0.45)
@@ -559,10 +603,22 @@ private struct CountdownOverlay: View {
 // Short banner during the goal pause, attributed by GameCore's lastScorer.
 private struct GoalOverlay: View {
     let scorer: PlayerSide
+    let isLocalVersus: Bool
+
+    private var text: String {
+        switch scorer {
+        case .home:
+            return isLocalVersus ? "PLAYER 1 SCORE" : "GOAL!"
+        case .away:
+            return isLocalVersus ? "PLAYER 2 SCORE" : "CPU SCORE"
+        }
+    }
 
     var body: some View {
-        Text(scorer == .home ? "GOAL!" : "CPU SCORE")
+        Text(text)
             .font(.system(size: 48, weight: .heavy, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
             .foregroundStyle(scorer == .home ? Palette.home : Palette.away)
             .shadow(color: .black.opacity(0.7), radius: 10)
             .padding(.horizontal, 26)
@@ -635,10 +691,11 @@ private struct PauseOverlay: View {
 
 private struct MatchHUDBar: View {
     let hud: MatchHUD
+    var isLocalVersus = false
 
     var body: some View {
         HStack(alignment: .center) {
-            scoreColumn(title: "あなた", score: hud.homeScore, color: Palette.home)
+            scoreColumn(title: isLocalVersus ? "P1" : "あなた", score: hud.homeScore, color: Palette.home)
 
             Spacer()
 
@@ -654,10 +711,10 @@ private struct MatchHUDBar: View {
 
             Spacer()
 
-            scoreColumn(title: "CPU", score: hud.awayScore, color: Palette.away)
+            scoreColumn(title: isLocalVersus ? "P2" : "CPU", score: hud.awayScore, color: Palette.away)
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 10)
+        .padding(.vertical, isLocalVersus ? 4 : 10)
     }
 
     private func scoreColumn(title: String, score: Int, color: Color) -> some View {
@@ -689,34 +746,57 @@ private struct BottomControls: View {
     let blockPhase: SkillPhase
     let blockRemainingSeconds: Int
     let onBlock: () -> Void
+    // Reuse for the away (P2) cluster in local versus: prefixed identifiers, an
+    // optional player label, and a compact size so two clusters fit one screen.
+    var identifierPrefix = ""
+    var playerLabel: String? = nil
+    var playerLabelIdentifier = ""
+    var compact = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 6) {
-            BoostSkillButton(
-                phase: boostPhase,
-                remainingSeconds: boostRemainingSeconds,
-                onBoost: onBoost
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            JoystickView(onMove: onMove)
-
-            HStack(spacing: 6) {
-                BlockSkillButton(
-                    phase: blockPhase,
-                    remainingSeconds: blockRemainingSeconds,
-                    onBlock: onBlock
-                )
-                ShotSkillButton(
-                    phase: shotPhase,
-                    remainingSeconds: shotRemainingSeconds,
-                    onShot: onShot
-                )
+        VStack(spacing: 2) {
+            if let playerLabel {
+                Text(playerLabel)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .accessibilityIdentifier(playerLabelIdentifier)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+
+            HStack(alignment: .center, spacing: 6) {
+                BoostSkillButton(
+                    phase: boostPhase,
+                    remainingSeconds: boostRemainingSeconds,
+                    onBoost: onBoost,
+                    identifier: identifierPrefix + "skill-boost-button"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                JoystickView(
+                    onMove: onMove,
+                    radius: compact ? 58 : 80,
+                    knobSize: compact ? 54 : 74,
+                    identifier: identifierPrefix + "joystick-control"
+                )
+
+                HStack(spacing: 6) {
+                    BlockSkillButton(
+                        phase: blockPhase,
+                        remainingSeconds: blockRemainingSeconds,
+                        onBlock: onBlock,
+                        identifier: identifierPrefix + "skill-block-button"
+                    )
+                    ShotSkillButton(
+                        phase: shotPhase,
+                        remainingSeconds: shotRemainingSeconds,
+                        onShot: onShot,
+                        identifier: identifierPrefix + "skill-shot-button"
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, compact ? 4 : 10)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 }
 
@@ -724,12 +804,14 @@ private struct BottomControls: View {
 // orientation (y up); returns to neutral on release. Holds no game rules.
 private struct JoystickView: View {
     let onMove: (Vector2) -> Void
+    // Large control + hit area by default; the local versus layout passes a smaller
+    // size. The produced 0...1 vector (and therefore GameCore movement) is the same
+    // for any size since the gesture math is radius-relative.
+    var radius: CGFloat = 80
+    var knobSize: CGFloat = 74
+    var identifier = "joystick-control"
     @State private var knobOffset: CGSize = .zero
 
-    // Larger control + hit area for easier dragging; the produced 0...1 vector (and
-    // therefore GameCore movement) is unchanged since the gesture math is radius-relative.
-    private let radius: CGFloat = 80
-    private let knobSize: CGFloat = 74
     // Ignore tiny thumb jitter, then ease the low end so small tilts still respond.
     private let deadZone: Double = 0.12
 
@@ -778,7 +860,7 @@ private struct JoystickView: View {
                     onMove(.zero)
                 }
         )
-        .accessibilityIdentifier("joystick-control")
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -789,6 +871,7 @@ private struct BoostSkillButton: View {
     let phase: SkillPhase
     let remainingSeconds: Int
     let onBoost: () -> Void
+    var identifier = "skill-boost-button"
 
     var body: some View {
         Button(action: { if phase == .ready { onBoost() } }) {
@@ -805,7 +888,7 @@ private struct BoostSkillButton: View {
             .animation(.snappy(duration: 0.15), value: phase)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("skill-boost-button")
+        .accessibilityIdentifier(identifier)
         .accessibilityValue(accessibilityValue)
     }
 
@@ -841,6 +924,7 @@ private struct ShotSkillButton: View {
     let phase: SkillPhase
     let remainingSeconds: Int
     let onShot: () -> Void
+    var identifier = "skill-shot-button"
 
     var body: some View {
         Button(action: { if phase == .ready { onShot() } }) {
@@ -857,7 +941,7 @@ private struct ShotSkillButton: View {
             .animation(.snappy(duration: 0.15), value: phase)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("skill-shot-button")
+        .accessibilityIdentifier(identifier)
         .accessibilityValue(accessibilityValue)
     }
 
@@ -893,6 +977,7 @@ private struct BlockSkillButton: View {
     let phase: SkillPhase
     let remainingSeconds: Int
     let onBlock: () -> Void
+    var identifier = "skill-block-button"
 
     var body: some View {
         Button(action: { if phase == .ready { onBlock() } }) {
@@ -909,7 +994,7 @@ private struct BlockSkillButton: View {
             .animation(.snappy(duration: 0.15), value: phase)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("skill-block-button")
+        .accessibilityIdentifier(identifier)
         .accessibilityValue(accessibilityValue)
     }
 
@@ -1312,6 +1397,9 @@ private struct SkillGuideView: View {
             InfoSection(title: "CPU", lines: [
                 "CPUも同じ3つのスキルを使ってくる"
             ])
+            InfoSection(title: "ローカル対戦", lines: [
+                "PLAYER 1 / PLAYER 2も同じ3つのスキルを使う"
+            ])
             InfoSection(title: "オンライン", lines: [
                 "準備中"
             ])
@@ -1345,6 +1433,10 @@ private struct HowToPlayView: View {
                 "クラシック：標準",
                 "ワイド：広め",
                 "スピード：速め"
+            ])
+            InfoSection(title: "ローカル対戦", lines: [
+                "1台を上下から2人で操作する",
+                "PLAYER 2の操作UIは反対側から読める向き"
             ])
             InfoSection(title: "オンライン", lines: [
                 "準備中"
