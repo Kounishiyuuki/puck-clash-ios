@@ -12,6 +12,12 @@ final class RinkScene: SKScene {
     // rendering the current state but never advances the session; pausing is a
     // presentation/session concern, so no paused flag exists in GameCore.
     var isMatchPaused = false
+    // Screen-space bands (in points, from the scene's full-screen edges) reserved
+    // by the SwiftUI layer for the HUD and control clusters. Defaults fit the
+    // single-cluster layout; the dual-cluster local versus layout reserves more at
+    // the top. Set before presentation.
+    var topReservedBand: CGFloat = 92
+    var bottomReservedBand: CGFloat = 172
     private var hasNotifiedFinish = false
     private var lastHUD: MatchHUD?
     private var lastScore: ScoreState?
@@ -109,46 +115,22 @@ final class RinkScene: SKScene {
         onFinished?(state.score)
     }
 
+    // A skill button's countdown as coarse whole seconds. Keeps the HUD publishing
+    // at the same low frequency as the score/clock.
+    private func coarseRemainingSeconds(_ skill: SkillState) -> Int {
+        switch skill.phase {
+        case .active:
+            return Int(skill.activeRemaining.rounded(.up))
+        case .cooldown:
+            return Int(skill.cooldownRemaining.rounded(.up))
+        case .ready:
+            return 0
+        }
+    }
+
     // Only push a HUD snapshot when a displayed value actually changed, so SwiftUI
     // is not re-rendered every frame.
     private func publishHUD(_ state: GameState, force: Bool) {
-        // Derive the home Boost button state from the simulation. A coarse whole-second
-        // value keeps the HUD publishing at the same low frequency as the score/clock.
-        let boost = state.homeBoost
-        let boostRemainingSeconds: Int
-        switch boost.phase {
-        case .active:
-            boostRemainingSeconds = Int(boost.activeRemaining.rounded(.up))
-        case .cooldown:
-            boostRemainingSeconds = Int(boost.cooldownRemaining.rounded(.up))
-        case .ready:
-            boostRemainingSeconds = 0
-        }
-
-        // Same coarse whole-second derivation for the Shot button.
-        let shot = state.homeShot
-        let shotRemainingSeconds: Int
-        switch shot.phase {
-        case .active:
-            shotRemainingSeconds = Int(shot.activeRemaining.rounded(.up))
-        case .cooldown:
-            shotRemainingSeconds = Int(shot.cooldownRemaining.rounded(.up))
-        case .ready:
-            shotRemainingSeconds = 0
-        }
-
-        // Same coarse whole-second derivation for the Block button.
-        let block = state.homeBlock
-        let blockRemainingSeconds: Int
-        switch block.phase {
-        case .active:
-            blockRemainingSeconds = Int(block.activeRemaining.rounded(.up))
-        case .cooldown:
-            blockRemainingSeconds = Int(block.cooldownRemaining.rounded(.up))
-        case .ready:
-            blockRemainingSeconds = 0
-        }
-
         let snapshot = MatchHUD(
             homeScore: state.score.home,
             awayScore: state.score.away,
@@ -156,12 +138,18 @@ final class RinkScene: SKScene {
             matchPhase: state.phase,
             phaseRemainingSeconds: Int(state.phaseRemaining.rounded(.up)),
             lastScorer: state.lastScorer,
-            boostPhase: boost.phase,
-            boostRemainingSeconds: boostRemainingSeconds,
-            shotPhase: shot.phase,
-            shotRemainingSeconds: shotRemainingSeconds,
-            blockPhase: block.phase,
-            blockRemainingSeconds: blockRemainingSeconds
+            boostPhase: state.homeBoost.phase,
+            boostRemainingSeconds: coarseRemainingSeconds(state.homeBoost),
+            shotPhase: state.homeShot.phase,
+            shotRemainingSeconds: coarseRemainingSeconds(state.homeShot),
+            blockPhase: state.homeBlock.phase,
+            blockRemainingSeconds: coarseRemainingSeconds(state.homeBlock),
+            awayBoostPhase: state.awayBoost.phase,
+            awayBoostRemainingSeconds: coarseRemainingSeconds(state.awayBoost),
+            awayShotPhase: state.awayShot.phase,
+            awayShotRemainingSeconds: coarseRemainingSeconds(state.awayShot),
+            awayBlockPhase: state.awayBlock.phase,
+            awayBlockRemainingSeconds: coarseRemainingSeconds(state.awayBlock)
         )
         if force || snapshot != lastHUD {
             lastHUD = snapshot
@@ -493,10 +481,11 @@ final class RinkScene: SKScene {
 
     private func rinkFrame(for config: MatchConfig) -> CGRect {
         // Minimal side padding pushes the rink close to the screen edges; the top
-        // clears the HUD and the bottom reserves the joystick / skill control zone.
+        // clears the HUD (and, in local versus, the P2 cluster) and the bottom
+        // reserves the joystick / skill control zone.
         let horizontalPadding: CGFloat = 4
-        let topPadding: CGFloat = 92
-        let bottomPadding: CGFloat = 172
+        let topPadding = topReservedBand
+        let bottomPadding = bottomReservedBand
         let availableSize = CGSize(
             width: max(1, size.width - horizontalPadding * 2),
             height: max(1, size.height - topPadding - bottomPadding)

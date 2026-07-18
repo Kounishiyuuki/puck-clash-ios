@@ -304,6 +304,101 @@ final class PuckClashUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["joystick-control"].exists)
     }
 
+    // Shared navigation: Start -> Local Versus -> Classic -> Match.
+    @MainActor
+    private func enterLocalMatch(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        app.buttons["start-match-button"].tap()
+        XCTAssertTrue(app.buttons["local-versus-mode-button"].waitForExistence(timeout: 5))
+        app.buttons["local-versus-mode-button"].tap()
+        // Local versus goes straight to map selection — no difficulty screen.
+        XCTAssertTrue(app.buttons["map-classic"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["cpu-difficulty-screen"].exists)
+        app.buttons["map-classic"].tap()
+        XCTAssertTrue(app.otherElements["joystick-control"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLocalVersusShowsDualControlsThroughCountdown() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterLocalMatch(app)
+
+        // Sampled right after the match screen appears: inside the countdown both
+        // sides' controls exist but are locked.
+        let homeBoost = app.buttons["skill-boost-button"]
+        let awayBoost = app.buttons["away-skill-boost-button"]
+        XCTAssertTrue(homeBoost.waitForExistence(timeout: 5))
+        XCTAssertTrue(awayBoost.exists)
+        XCTAssertFalse(homeBoost.isEnabled)
+        XCTAssertFalse(awayBoost.isEnabled)
+        XCTAssertTrue(app.staticTexts["match-countdown-overlay"].exists)
+
+        // Both clusters are complete.
+        XCTAssertTrue(app.otherElements["away-joystick-control"].exists)
+        XCTAssertTrue(app.buttons["away-skill-shot-button"].exists)
+        XCTAssertTrue(app.buttons["away-skill-block-button"].exists)
+        XCTAssertTrue(app.buttons["skill-shot-button"].exists)
+        XCTAssertTrue(app.buttons["skill-block-button"].exists)
+        XCTAssertTrue(app.staticTexts["player-one-label"].exists)
+        XCTAssertTrue(app.staticTexts["player-two-label"].exists)
+
+        // Countdown ends: both sides unlock.
+        XCTAssertTrue(app.staticTexts["match-countdown-overlay"].waitForNonExistence(timeout: 8))
+        XCTAssertTrue(homeBoost.isEnabled)
+        XCTAssertTrue(awayBoost.isEnabled)
+    }
+
+    @MainActor
+    func testLocalVersusPauseLocksBothSidesAndResumes() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterLocalMatch(app)
+        XCTAssertTrue(app.staticTexts["match-countdown-overlay"].waitForNonExistence(timeout: 8))
+
+        let pauseButton = app.buttons["pause-match-button"]
+        XCTAssertTrue(pauseButton.waitForExistence(timeout: 5))
+        pauseButton.tap()
+
+        XCTAssertTrue(app.staticTexts["pause-overlay"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["skill-boost-button"].isEnabled)
+        XCTAssertFalse(app.buttons["away-skill-boost-button"].isEnabled)
+
+        app.buttons["resume-match-button"].tap()
+        XCTAssertTrue(app.staticTexts["pause-overlay"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["skill-boost-button"].isEnabled)
+        XCTAssertTrue(app.buttons["away-skill-boost-button"].isEnabled)
+    }
+
+    @MainActor
+    func testLocalVersusQuitReturnsToTitle() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterLocalMatch(app)
+
+        XCTAssertTrue(app.buttons["pause-match-button"].waitForExistence(timeout: 5))
+        app.buttons["pause-match-button"].tap()
+        XCTAssertTrue(app.buttons["quit-match-button"].waitForExistence(timeout: 5))
+        app.buttons["quit-match-button"].tap()
+        XCTAssertTrue(app.buttons["quit-confirm-button"].waitForExistence(timeout: 5))
+        app.buttons["quit-confirm-button"].tap()
+
+        XCTAssertTrue(app.buttons["start-match-button"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.otherElements["joystick-control"].exists)
+    }
+
+    @MainActor
+    func testCPUPracticeShowsNoAwayControls() throws {
+        let app = XCUIApplication()
+        app.launch()
+        enterMatch(app)
+
+        // The CPU drives the away side; there is no second control cluster.
+        XCTAssertFalse(app.otherElements["away-joystick-control"].exists)
+        XCTAssertFalse(app.buttons["away-skill-boost-button"].exists)
+        XCTAssertFalse(app.staticTexts["player-two-label"].exists)
+    }
+
     @MainActor
     func testOnlineMatchShowsComingSoon() throws {
         let app = XCUIApplication()
